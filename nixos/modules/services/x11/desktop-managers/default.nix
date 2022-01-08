@@ -20,6 +20,7 @@ in
   imports = [
     ./none.nix ./xterm.nix ./xfce.nix ./plasma5.nix ./lumina.nix
     ./lxqt.nix ./enlightenment.nix ./gnome.nix ./retroarch.nix ./kodi.nix
+    ./phosh.nix
     ./mate.nix ./pantheon.nix ./surf-display.nix ./cde.nix
     ./cinnamon.nix
   ];
