@@ -1,12 +1,14 @@
-{ lib, stdenv, fetchurl }:
+{ lib, stdenv, fetchFromGitHub }:
 
 stdenv.mkDerivation rec {
   pname = "alsa-ucm-conf";
   version = "1.2.6.3";
 
-  src = fetchurl {
-    url = "mirror://alsa/lib/${pname}-${version}.tar.bz2";
-    sha256 = "sha256-uKA6o4emJKL2XtwgG/d3QhGQtgUpqSCHZGgjr72Wxc0=";
+  src = fetchFromGitHub {
+    owner = "tomfitzhenry";
+    repo = pname;
+    rev = "00da81e546718f05a823fe7ab177bf80fff30039";
+    sha256 = "sha256-VXNzir+bqZZViaBRsXOdm6pEf8zaWXodFlY+0Rc/XgE=";
   };
 
   dontBuild = true;
