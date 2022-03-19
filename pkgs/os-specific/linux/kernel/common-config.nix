@@ -854,7 +854,6 @@ let
       HWMON         = yes;
       THERMAL_HWMON = yes; # Hardware monitoring support
       NVME_HWMON    = whenAtLeast "5.5" yes; # NVMe drives temperature reporting
-      UEVENT_HELPER = no;
 
       USERFAULTFD   = yes;
       X86_CHECK_BIOS_CORRUPTION = yes;
