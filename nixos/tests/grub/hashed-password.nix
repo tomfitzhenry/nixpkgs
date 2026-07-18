@@ -60,7 +60,7 @@
     grub_select_all_configurations()
     with subtest("Invalid hashedPassword credentials are rejected"):
         grub_login_as("bob", "wrongsecret")
-        machine.wait_for_console_text("error: access denied.")
+        machine.wait_for_console_text("access denied")
 
     grub_select_all_configurations()
     with subtest("Valid hashedPassword credentials are accepted"):
