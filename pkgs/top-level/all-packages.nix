@@ -1489,6 +1489,9 @@ with pkgs;
 
   inherit (callPackage ../misc/coreboot { })
     buildCoreboot
+    corebootBlobs
+    corebootUefi_apu2
+    grubCoreboot
     ;
 
   inherit (callPackages ../tools/misc/coreboot-utils { })

@@ -422,6 +422,10 @@ in
   containers-tmpfs = runTest ./containers-tmpfs.nix;
   containers-unified-hierarchy = runTest ./containers-unified-hierarchy.nix;
   convos = runTest ./convos.nix;
+  coreboot = {
+    boot-grub = runTestOn [ "x86_64-linux" "i686-linux" ] ./coreboot/boot-grub.nix;
+    boot-uefi = runTestOn [ "x86_64-linux" ] ./coreboot/boot-uefi.nix;
+  };
   coredns = runTest ./coredns.nix;
   corerad = runTest ./corerad.nix;
   corteza = runTest ./corteza.nix;
@@ -736,9 +740,6 @@ in
   grow-partition = runTest ./grow-partition.nix;
   grub = {
     basic = runTest ./grub/basic.nix;
-    coreboot = runTestOn [ "x86_64-linux" "i686-linux" ] ./grub/coreboot.nix;
-    coreboot-boot = runTestOn [ "x86_64-linux" "i686-linux" ] ./grub/coreboot-boot.nix;
-    coreboot-uefi = runTestOn [ "x86_64-linux" ] ./grub/coreboot-uefi.nix;
     efi = runTest ./grub/efi.nix;
     graphical = runTest ./grub/graphical.nix;
     hashed-password = runTest ./grub/hashed-password.nix;

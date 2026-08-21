@@ -176,7 +176,9 @@ stdenv.mkDerivation (finalAttrs: {
 
             buildPhase = ''
               runHook preBuild
-              build -a ${targetArch} -b ${attrs.buildConfig or "RELEASE"} -t ${buildType} -p ${projectDscPath} -n $NIX_BUILD_CORES $buildFlags
+              build ${
+                lib.concatMapStringsSep " " (a: "-a ${a}") (lib.splitString " " (attrs.arch or targetArch))
+              } -b ${attrs.buildConfig or "RELEASE"} -t ${buildType} -p ${projectDscPath} -n $NIX_BUILD_CORES $buildFlags
               runHook postBuild
             '';
 
@@ -190,6 +192,7 @@ stdenv.mkDerivation (finalAttrs: {
             "nativeBuildInputs"
             "depsBuildBuild"
             "env"
+            "arch"
           ]
           // {
             env = targetPrefixes // (attrs.env or { });
@@ -222,6 +225,12 @@ stdenv.mkDerivation (finalAttrs: {
 
           buildFlags = [ "-D BOOTLOADER=COREBOOT" ];
           buildConfig = "RELEASE";
+
+          # coreboot always enters payloads in 32-bit protected mode, so the
+          # payload needs a 32-bit (IA32) entry point. UefiPayloadPkg built for
+          # both IA32 and X64 provides that: the IA32 SEC entry switches to
+          # long mode and hands over to the X64 DXE core.
+          arch = "IA32 X64";
 
           passthru = {
             # The built payload, for embedding in a coreboot ROM.

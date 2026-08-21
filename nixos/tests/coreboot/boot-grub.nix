@@ -1,6 +1,7 @@
 { config, lib, ... }:
 let
-  grubCoreboot = config.node.pkgs.grub2.override { corebootSupport = true; };
+  # GRUB built for coreboot, from which the payload below is generated.
+  grubCoreboot = config.node.pkgs.grubCoreboot;
 
   # The GRUB payload that coreboot loads. It switches to the serial console,
   # finds the NixOS boot disk by label and chains into the GRUB config that
@@ -37,7 +38,8 @@ let
     '';
   };
 
-  # coreboot firmware with the GRUB payload embedded.
+  # coreboot firmware (for the QEMU q35 emulation board) with the GRUB payload
+  # embedded.
   corebootRom = config.node.pkgs.buildCoreboot {
     defconfig = "emulation_qemu_x86_q35_smm_tseg";
     config = {
@@ -49,7 +51,7 @@ let
   };
 in
 {
-  name = "grub-coreboot-boot";
+  name = "coreboot-boot-grub";
 
   meta = with lib.maintainers; {
     maintainers = [ tomfitzhenry ];
@@ -78,10 +80,21 @@ in
         extraConfig = "serial; terminal_output serial";
       };
       boot.kernelParams = [ "console=ttyS0" ];
+
+      # So the VM can inspect the i386-coreboot target produced by the GRUB
+      # coreboot build.
+      environment.systemPackages = [ grubCoreboot ];
     };
 
   testScript = ''
     machine.start()
+
+    with subtest("coreboot build produces the i386-coreboot target"):
+        # The coreboot platform modules, including the coreboot-specific ones.
+        machine.succeed("test -d ${grubCoreboot}/lib/grub/i386-coreboot")
+        machine.succeed("test -f ${grubCoreboot}/lib/grub/i386-coreboot/kernel.img")
+        for module in ["cbfs", "cbtime", "cbls", "cbmemc"]:
+            machine.succeed(f"test -f ${grubCoreboot}/lib/grub/i386-coreboot/{module}.mod")
 
     with subtest("Booting via coreboot firmware"):
         machine.wait_for_console_text("coreboot")
