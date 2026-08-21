@@ -167,7 +167,8 @@ let
 
         ${
           if defconfigFile != null then
-            "cp ${defconfigFile} .config"
+            # -m so the resulting .config is writable (store paths are 0444)
+            "install -m 0644 ${defconfigFile} .config"
           else
             "cp configs/config.${defconfig} .config"
         }
