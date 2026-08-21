@@ -8,6 +8,9 @@
   buildPackages,
   nixosTests,
   writeScript,
+  util-linux,
+  nasm,
+  acpica-tools,
 }:
 
 let
@@ -138,78 +141,122 @@ stdenv.mkDerivation (finalAttrs: {
     maintainers = [ lib.maintainers.mjoerg ];
   };
 
-  passthru = {
-    # exercise a channel blocker
-    tests = {
-      systemdBootExtraEntries = nixosTests.systemd-boot.extraEntries;
-      uefiUsb = nixosTests.boot.uefiCdrom;
-    };
+  passthru =
+    let
+      mkDerivation =
+        projectDscPath: attrsOrFun:
+        stdenv.mkDerivation (
+          finalAttrsInner:
+          let
+            attrs = lib.toFunction attrsOrFun finalAttrsInner;
+            buildType = attrs.buildType or (if stdenv.hostPlatform.isDarwin then "CLANGPDB" else "GCC");
+          in
+          {
+            inherit (finalAttrs) src;
 
-    updateScript = writeScript "update-edk2" ''
-      #!/usr/bin/env nix-shell
-      #!nix-shell -i bash -p common-updater-scripts coreutils gnused
-      set -eu -o pipefail
-      version="$(list-git-tags --url="${finalAttrs.srcWithVendoring.url}" |
-                 sed -E --quiet 's/^edk2-stable([0-9\\.]+)$/\1/p' |
-                 sort --reverse --numeric-sort |
-                 head -n 1)"
-      if [[ "x$UPDATE_NIX_OLD_VERSION" != "x$version" ]]; then
-          update-source-version --source-key=srcWithVendoring \
-              "$UPDATE_NIX_ATTR_PATH" "$version"
-      fi
-    '';
+            depsBuildBuild = [ buildPackages.stdenv.cc ] ++ attrs.depsBuildBuild or [ ];
+            nativeBuildInputs = [
+              bc
+              pythonEnv
+            ]
+            ++ attrs.nativeBuildInputs or [ ];
+            strictDeps = true;
 
-    mkDerivation =
-      projectDscPath: attrsOrFun:
-      stdenv.mkDerivation (
-        finalAttrsInner:
-        let
-          attrs = lib.toFunction attrsOrFun finalAttrsInner;
-          buildType = attrs.buildType or (if stdenv.hostPlatform.isDarwin then "CLANGPDB" else "GCC");
-        in
-        {
-          inherit (finalAttrs) src;
+            prePatch = ''
+              rm -rf BaseTools
+              ln -sv ${buildPackages.edk2}/BaseTools BaseTools
+            '';
 
-          depsBuildBuild = [ buildPackages.stdenv.cc ] ++ attrs.depsBuildBuild or [ ];
-          nativeBuildInputs = [
-            bc
-            pythonEnv
+            configurePhase = ''
+              runHook preConfigure
+              export WORKSPACE="$PWD"
+              . ${buildPackages.edk2}/edksetup.sh BaseTools
+              runHook postConfigure
+            '';
+
+            buildPhase = ''
+              runHook preBuild
+              build -a ${targetArch} -b ${attrs.buildConfig or "RELEASE"} -t ${buildType} -p ${projectDscPath} -n $NIX_BUILD_CORES $buildFlags
+              runHook postBuild
+            '';
+
+            installPhase = ''
+              runHook preInstall
+              mv -v Build/*/* $out
+              runHook postInstall
+            '';
+          }
+          // removeAttrs attrs [
+            "nativeBuildInputs"
+            "depsBuildBuild"
+            "env"
           ]
-          ++ attrs.nativeBuildInputs or [ ];
-          strictDeps = true;
+          // {
+            env = targetPrefixes // (attrs.env or { });
+          }
+        );
+    in
+    {
+      inherit mkDerivation;
 
-          prePatch = ''
-            rm -rf BaseTools
-            ln -sv ${buildPackages.edk2}/BaseTools BaseTools
-          '';
+      # EDK2 UEFI firmware as a coreboot payload (UefiPayloadPkg). The build
+      # mode (e.g. `buildConfig = "DEBUG"`) can be changed via `.override`.
+      corebootPayload = lib.makeOverridable (
+        overrides:
+        mkDerivation "UefiPayloadPkg/UefiPayloadPkg.dsc" (finalAttrsInner: {
+          pname = "edk2-coreboot-payload";
+          version = finalAttrs.version;
 
-          configurePhase = ''
-            runHook preConfigure
-            export WORKSPACE="$PWD"
-            . ${buildPackages.edk2}/edksetup.sh BaseTools
-            runHook postConfigure
-          '';
+          nativeBuildInputs = [
+            util-linux
+            nasm
+            acpica-tools
+          ];
 
-          buildPhase = ''
-            runHook preBuild
-            build -a ${targetArch} -b ${attrs.buildConfig or "RELEASE"} -t ${buildType} -p ${projectDscPath} -n $NIX_BUILD_CORES $buildFlags
-            runHook postBuild
-          '';
+          hardeningDisable = [
+            "format"
+            "stackprotector"
+            "pic"
+            "fortify"
+          ];
 
-          installPhase = ''
-            runHook preInstall
-            mv -v Build/*/* $out
-            runHook postInstall
-          '';
-        }
-        // removeAttrs attrs [
-          "nativeBuildInputs"
-          "depsBuildBuild"
-          "env"
-        ]
-        // {
-          env = targetPrefixes // (attrs.env or { });
-        }
-      );
-  };
+          buildFlags = [ "-D BOOTLOADER=COREBOOT" ];
+          buildConfig = "RELEASE";
+
+          passthru = {
+            # The built payload, for embedding in a coreboot ROM.
+            payload = "${finalAttrsInner.finalPackage}/FV/UEFIPAYLOAD.fd";
+          };
+
+          meta = {
+            description = "EDK2 UEFI firmware as a coreboot payload (UefiPayloadPkg)";
+            homepage = "https://github.com/tianocore/edk2";
+            license = lib.licenses.bsd2;
+            maintainers = with lib.maintainers; [ tomfitzhenry ];
+            platforms = lib.platforms.x86_64;
+          };
+        })
+        // overrides
+      ) { };
+
+      # exercise a channel blocker
+      tests = {
+        systemdBootExtraEntries = nixosTests.systemd-boot.extraEntries;
+        uefiUsb = nixosTests.boot.uefiCdrom;
+      };
+
+      updateScript = writeScript "update-edk2" ''
+        #!/usr/bin/env nix-shell
+        #!nix-shell -i bash -p common-updater-scripts coreutils gnused
+        set -eu -o pipefail
+        version="$(list-git-tags --url="${finalAttrs.srcWithVendoring.url}" |
+                   sed -E --quiet 's/^edk2-stable([0-9\\.]+)$/\1/p' |
+                   sort --reverse --numeric-sort |
+                   head -n 1)"
+        if [[ "x$UPDATE_NIX_OLD_VERSION" != "x$version" ]]; then
+            update-source-version --source-key=srcWithVendoring \
+                "$UPDATE_NIX_ATTR_PATH" "$version"
+        fi
+      '';
+    };
 })

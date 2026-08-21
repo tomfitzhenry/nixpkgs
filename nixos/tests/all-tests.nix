@@ -736,6 +736,9 @@ in
   grow-partition = runTest ./grow-partition.nix;
   grub = {
     basic = runTest ./grub/basic.nix;
+    coreboot = runTestOn [ "x86_64-linux" "i686-linux" ] ./grub/coreboot.nix;
+    coreboot-boot = runTestOn [ "x86_64-linux" "i686-linux" ] ./grub/coreboot-boot.nix;
+    coreboot-uefi = runTestOn [ "x86_64-linux" ] ./grub/coreboot-uefi.nix;
     efi = runTest ./grub/efi.nix;
     graphical = runTest ./grub/graphical.nix;
     hashed-password = runTest ./grub/hashed-password.nix;
