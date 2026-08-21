@@ -159,7 +159,6 @@ let
         )}
         patchShebangs util/xcompile/xcompile
         patchShebangs util/genbuild_h/genbuild_h.sh
-        substituteInPlace payloads/external/*/Makefile --replace "git" "echo"
       '';
 
       configurePhase = ''
