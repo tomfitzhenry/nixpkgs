@@ -254,6 +254,27 @@ let
       "extraNativeBuildInputs"
     ]
   );
+
+  # coreboot firmware with EDK2's UEFI payload for the ASUS Chromebook C300SA
+  # (google/cyan, variant terra), built directly as a full 8MiB ROM. This is a
+  # plain `buildCoreboot` call.
+  corebootUefi_terra = buildCoreboot {
+    defconfigFile = ./defconfigs/google-cyan-terra;
+    config = {
+      PAYLOAD_ELF = "y";
+      PAYLOAD_FILE = edk2.corebootPayload.payload;
+    };
+    files = {
+      # FSP, EC firmware, flash descriptor and Intel ME; not in the upstream
+      # blobs repo, only in MrChromebox's fork.
+      "3rdparty/blobs" = corebootBlobsMrChromebox;
+      # Intel CPU microcode, consumed by the Braswell microcode update.
+      "3rdparty/intel-microcode" = corebootIntelMicrocode;
+    };
+    # ecrw.hash (the EC firmware digest) is computed with openssl.
+    extraNativeBuildInputs = [ openssl ];
+    filesToInstall = [ "build/coreboot.rom" ];
+  };
 in
 {
   inherit
@@ -261,6 +282,7 @@ in
     corebootBlobs
     corebootBlobsMrChromebox
     corebootIntelMicrocode
+    corebootUefi_terra
     ;
 
   # GRUB built for the coreboot platform (i386-coreboot). To embed GRUB in a
