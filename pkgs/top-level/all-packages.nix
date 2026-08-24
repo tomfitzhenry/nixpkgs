@@ -1490,6 +1490,8 @@ with pkgs;
   inherit (callPackage ../misc/coreboot { })
     buildCoreboot
     corebootBlobs
+    corebootBlobsMrChromebox
+    corebootIntelMicrocode
     corebootUefi_apu2
     grubCoreboot
     ;

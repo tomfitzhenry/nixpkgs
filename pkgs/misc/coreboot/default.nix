@@ -44,6 +44,25 @@ let
       };
     };
 
+  # MrChromebox's fork of coreboot's 3rdparty/blobs repo. Some older boards'
+  # blobs (e.g. the Braswell google/cyan FSP, EC firmware, flash descriptor and
+  # Intel ME) were dropped from the upstream blobs repo, and only survive here.
+  corebootBlobsMrChromebox =
+    fetchgit {
+      url = "https://github.com/MrChromebox/blobs.git";
+      rev = "62a8b7c85602ba6eb38e366fd7220eee77446251";
+      hash = "sha256-Pv2fPdvUVfAGUQXkZ1l0atZJwpnAvOa/rR2gQF95YyU=";
+    }
+    // {
+      meta = {
+        description = "MrChromebox fork of coreboot's binary blobs repo (has older boards' blobs)";
+        homepage = "https://github.com/MrChromebox/blobs";
+        # Blob licenses vary, but none of them are free software.
+        license = lib.licenses.unfree;
+        maintainers = with lib.maintainers; [ tomfitzhenry ];
+      };
+    };
+
   # cbfstool links against vboot's host library, so every coreboot build needs
   # it. Unlike the other 3rdparty submodules it is free software (BSD), so it
   # is provided by default.
@@ -51,6 +70,16 @@ let
     url = "https://github.com/coreboot/vboot.git";
     rev = "5c360ef458b0a013d8a6d47724bb0fffb5accbcf";
     hash = "sha256-BZdyUPa9RD2txjFfgcyEQEG+Z6yPJpXRdwTe1ExwaSs=";
+  };
+
+  # coreboot's 3rdparty/intel-microcode submodule: Intel CPU microcode updates
+  # (free software), needed by Intel boards that enable microcode in CBFS.
+  # It is not fetched as part of `defaultSrc`; boards that need it inject it via
+  # `buildCoreboot`'s `files` argument. Pinned to the rev coreboot itself uses.
+  corebootIntelMicrocode = fetchgit {
+    url = "https://review.coreboot.org/intel-microcode";
+    rev = "98f8d817ca3d560c48ae988bd805d1b53b48a631";
+    hash = "sha256-hJfuxnHxHAxoTFAdgzontCl2pl5ad222I8BGyHO+MxQ=";
   };
 
   # Render a Kconfig value for coreboot's `.config`:
@@ -227,7 +256,12 @@ let
   );
 in
 {
-  inherit buildCoreboot corebootBlobs;
+  inherit
+    buildCoreboot
+    corebootBlobs
+    corebootBlobsMrChromebox
+    corebootIntelMicrocode
+    ;
 
   # GRUB built for the coreboot platform (i386-coreboot). To embed GRUB in a
   # coreboot ROM, build a payload with grub-mkstandalone (see coreboot's own
