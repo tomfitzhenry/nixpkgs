@@ -1491,6 +1491,7 @@ with pkgs;
     buildCoreboot
     corebootBlobs
     corebootBlobsMrChromebox
+    corebootFsp
     corebootIntelMicrocode
     corebootUefi_apu2
     corebootUefi_terra

@@ -24,6 +24,19 @@ let
     fetchSubmodules = false;
   };
 
+  # Source for the ASUS Chromebook C300SA (google/cyan, variant terra) build.
+  # Tom Fitzhenry's fork of coreboot, on top of upstream main: it drops
+  # USE_GOOGLE_FSP so terra can use the public Braswell FSP from 3rdparty/fsp
+  # instead of Google's custom FSP binary (the two FSPs carry byte-identical
+  # MemoryInit UPD defaults, so the variants work unchanged).
+  # https://github.com/tomfitzhenry/coreboot/tree/cyan-public-fsp
+  terraSrc = fetchgit {
+    url = "https://github.com/tomfitzhenry/coreboot";
+    rev = "d8da1aeb2e8e57ac76a4d6b0fa17398ea90a745c";
+    hash = "sha256-TXBrU6pBP8X05lzr6M0bl1H87qxFMEl6UUtcNfmm+z8=";
+    fetchSubmodules = false;
+  };
+
   # coreboot's 3rdparty/blobs repository: binary blobs (e.g. AGESA, Intel ME,
   # FSP) required by some mainboards. It is not fetched as part of
   # `defaultSrc` because the blobs are not free software; boards that need them
@@ -82,6 +95,27 @@ let
     hash = "sha256-hJfuxnHxHAxoTFAdgzontCl2pl5ad222I8BGyHO+MxQ=";
   };
 
+  # coreboot's 3rdparty/fsp submodule: mainline Intel FSP binaries. Terra uses
+  # the public Braswell FSP (BSWFSP.fd); it is not fetched as part of
+  # `defaultSrc`/`terraSrc` because FSP binaries are not free software, so the
+  # terra build injects it via `buildCoreboot`'s `files` argument. Pinned to
+  # the rev `terraSrc`'s .gitmodules pins (7cb9638a8d2233017fcc37e446bc8656bb27e92e).
+  corebootFsp =
+    fetchgit {
+      url = "https://review.coreboot.org/fsp.git";
+      rev = "7cb9638a8d2233017fcc37e446bc8656bb27e92e";
+      hash = "sha256-bl7AKYs+ixei+04keVlJn5Hf0AlmwI/68E9iWOY0wB4=";
+    }
+    // {
+      meta = {
+        description = "Mainline Intel FSP binaries (coreboot 3rdparty/fsp)";
+        homepage = "https://review.coreboot.org/plugins/gitiles/fsp";
+        # FSP binaries are distributed under Intel's restrictive FSP license.
+        license = lib.licenses.unfree;
+        maintainers = with lib.maintainers; [ tomfitzhenry ];
+      };
+    };
+
   # Render a Kconfig value for coreboot's `.config`:
   # - booleans become y/n
   # - integers are written bare
@@ -95,6 +129,8 @@ let
     else if value == "y" || value == "n" then
       value
     else if builtins.match "[0-9]+" value != null then
+      value
+    else if builtins.match "0x[0-9a-fA-F]+" value != null then
       value
     else
       ''"${value}"'';
@@ -256,18 +292,40 @@ let
   );
 
   # coreboot firmware with EDK2's UEFI payload for the ASUS Chromebook C300SA
-  # (google/cyan, variant terra), built directly as a full 8MiB ROM. This is a
-  # plain `buildCoreboot` call.
+  # (google/cyan, variant terra), built directly as a full 8MiB ROM. Built from
+  # `terraSrc` (Tom Fitzhenry's coreboot fork), which lets terra use the public
+  # Intel FSP instead of Google's custom FSP; everything else uses
+  # `defaultSrc` (nixpkgs' coreboot). The fork's config.google_terra is a plain
+  # build-test defconfig (PAYLOAD_NONE); the `config` options turn it into a
+  # full ROM.
   corebootUefi_terra = buildCoreboot {
-    defconfigFile = ./defconfigs/google-cyan-terra;
+    src = terraSrc;
+    defconfig = "google_terra";
     config = {
+      # UEFI payload; the fork's PAYLOAD_NONE is dropped by buildCoreboot when
+      # a PAYLOAD_* option is set.
       PAYLOAD_ELF = "y";
       PAYLOAD_FILE = edk2.corebootPayload.payload;
+      # EC firmware, flash descriptor and Intel ME; not in the upstream blobs
+      # repo, only in MrChromebox's fork.
+      HAVE_IFD_BIN = "y";
+      IFD_BIN_PATH = "3rdparty/blobs/mainboard/google/cyan/terra/flashdescriptor.bin";
+      HAVE_ME_BIN = "y";
+      ME_BIN_PATH = "3rdparty/blobs/soc/intel/bsw/me.bin";
+      EC_GOOGLE_CHROMEEC_FIRMWARE_EXTERNAL = "y";
+      EC_GOOGLE_CHROMEEC_FIRMWARE_FILE = "3rdparty/blobs/mainboard/google/cyan/terra/ec.RW.flat";
+      # UEFI variable store. Enabled explicitly: the payload is a prebuilt
+      # EDK2 ELF (PAYLOAD_ELF), not coreboot's in-tree PAYLOAD_EDK2, so
+      # SMMSTORE's `default y if PAYLOAD_EDK2` never fires. SMMSTORE_SIZE
+      # is left at its default (0x80000).
+      SMMSTORE = "y";
     };
     files = {
-      # FSP, EC firmware, flash descriptor and Intel ME; not in the upstream
-      # blobs repo, only in MrChromebox's fork.
+      # EC firmware, flash descriptor and Intel ME; not in the upstream blobs
+      # repo, only in MrChromebox's fork.
       "3rdparty/blobs" = corebootBlobsMrChromebox;
+      # Public Braswell FSP, consumed via FSP_USE_REPO (BSWFSP.fd).
+      "3rdparty/fsp" = corebootFsp;
       # Intel CPU microcode, consumed by the Braswell microcode update.
       "3rdparty/intel-microcode" = corebootIntelMicrocode;
     };
@@ -281,6 +339,7 @@ in
     buildCoreboot
     corebootBlobs
     corebootBlobsMrChromebox
+    corebootFsp
     corebootIntelMicrocode
     corebootUefi_terra
     ;
