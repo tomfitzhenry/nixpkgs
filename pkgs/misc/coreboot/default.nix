@@ -6,6 +6,7 @@
   pkg-config,
   python3,
   cbfstool,
+  openssl,
 }:
 
 let
@@ -170,6 +171,10 @@ let
       hasPayload =
         payload != null
         || lib.any (name: lib.hasPrefix "CONFIG_PAYLOAD_" (configName name)) (lib.attrNames config);
+
+      # vboot builds sign the RW slots with the in-tree `futility`, which
+      # links against OpenSSL's libcrypto. CHROMEOS implies VBOOT in Kconfig.
+      usesVboot = (config'.VBOOT or "n") == "y" || (config'.CHROMEOS or "n") == "y";
     in
     stdenv.mkDerivation (finalAttrs: {
       pname = "coreboot-${if defconfig != null then defconfig else "custom"}";
@@ -182,6 +187,7 @@ let
         python3
       ]
       ++ lib.optional (fmap' != null) cbfstool
+      ++ lib.optional usesVboot openssl
       ++ extraNativeBuildInputs;
 
       enableParallelBuilding = true;
@@ -204,6 +210,20 @@ let
         ''}
         patchShebangs util/xcompile/xcompile
         patchShebangs util/genbuild_h/genbuild_h.sh
+      ''
+      # Kept out of the preceding string so non-vboot builds are unchanged.
+      + lib.optionalString usesVboot ''
+        # vboot's build scripts (e.g. scripts/getversion.sh) run directly
+        # during the futility build and need their interpreters patched.
+        patchShebangs 3rdparty/vboot
+        # glibc 2.44 (C23) makes strchr()/strrchr() preserve the constness of
+        # their argument, so vboot's futility (which assigns the result to a
+        # `char *`) now trips -Werror=discarded-qualifiers. Keep the warning
+        # but don't let it fail the build.
+        substituteInPlace util/futility/Makefile.mk \
+          --replace-fail \
+            'WERROR="-Werror -Wno-deprecated-declarations"' \
+            'WERROR="-Werror -Wno-deprecated-declarations -Wno-error=discarded-qualifiers"'
       '';
 
       configurePhase = ''
