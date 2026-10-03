@@ -86,21 +86,6 @@ let
     hash = "sha256-hJfuxnHxHAxoTFAdgzontCl2pl5ad222I8BGyHO+MxQ=";
   };
 
-  # The CWWK CW-ADLN-NAS mainboard is not in mainline 26.06. This is the
-  # author's hardware-verified branch: mainline after the 26.06 tag plus the
-  # Twin Lake variant (SuperIO COM1 console, live-dumped GPIO, USB-first EDK2
-  # boot order, CLKREQ/ASPM fixes) and, on top, the vboot Kconfig block and
-  # 16 MiB RW_AB FMAP. Pinning the branch keeps the verified ROM reproducible
-  # from nixpkgs without carrying the board as patches.
-  #
-  # https://github.com/tomfitzhenry/coreboot/tree/cwwk-adln-nas-vboot-verified
-  cwwkCorebootSrc = fetchgit {
-    url = "https://github.com/tomfitzhenry/coreboot.git";
-    rev = "e936df46ff82b00ec8515dddeb8e97f73dfab958";
-    hash = "sha256-SqOgvk4euhxqLCCfzyx81yYUsU2iOMsUrYumOELJvII=";
-    fetchSubmodules = false;
-  };
-
   # Render a Kconfig value for coreboot's `.config`:
   # - booleans become y/n
   # - integers are written bare
@@ -454,106 +439,6 @@ let
     };
   };
 
-  # coreboot with vboot (verified boot) and the EDK2 UEFI payload for the CWWK
-  # CW-ADLN-NAS, an Intel Alder Lake-N/Twin Lake (N355) NAS board.
-  #
-  # Built from the author's hardware-verified branch (see `cwwkCorebootSrc`),
-  # which already contains the mainboard support, the SuperIO COM1 console, the
-  # live-dumped GPIO table and the board's vboot Kconfig block and 16 MiB RW_AB
-  # FMAP. The public Intel FSP and the CPU microcode are injected from
-  # coreboot's 3rdparty submodules (`files`).
-  #
-  # The earlier approach (Gerrit change 91908 plus local vboot patches) is
-  # superseded by this branch; the Gerrit change remains at
-  # https://review.coreboot.org/c/coreboot/+/91908.
-  #
-  # Runtime VBNV is stored in CMOS with a flash backup (the SoC selects
-  # VBOOT_VBNV_CMOS_BACKUP_TO_FLASH), which is why the FMAP needs RW_NVRAM.
-  cwwkAdlVbootRom = mkCoreboot {
-    src = cwwkCorebootSrc;
-    defconfigFile = ./cwwk-adl-cw-adln-nas-twinlake-vboot.config;
-    payload = edk2.corebootPayload.payload;
-    config = {
-      VBOOT = "y";
-      VBOOT_SLOTS_RW_AB = "y";
-      # coreboot reserves the SMMSTORE region (the 0x80000 default matches the
-      # FMAP). The stock EDK2 payload uses the EMU/volatile variable backend,
-      # so UEFI variables are not persisted across reboots.
-      SMMSTORE = "y";
-      # Assemble the platform microcode from 3rdparty/intel-microcode.
-      CPU_MICROCODE_CBFS_DEFAULT_BINS = "y";
-      DEFAULT_CONSOLE_LOGLEVEL_8 = "y";
-    };
-    files = {
-      "3rdparty/fsp" = corebootFsp;
-      "3rdparty/intel-microcode" = corebootIntelMicrocode;
-    };
-    # futility (used to sign the RW slots) links against OpenSSL.
-    extraNativeBuildInputs = [ openssl ];
-    extraMeta = {
-      description = "coreboot firmware with vboot and the EDK2 UEFI payload for the CWWK CW-ADLN-NAS (Intel Twin Lake/N355)";
-    };
-  };
-
-  # Structural check of the CW-ADLN-NAS vboot ROM, runnable without hardware.
-  # It asserts the vboot RW_AB FMAP and signed firmware slots are present, that
-  # the RO slot carries the early stages and the RW slots carry ramstage and
-  # the payload, and that each VBLOCK signs its FW_MAIN body.
-  cwwkAdlVbootRomStructureTest = stdenv.mkDerivation {
-    pname = "corebootVboot_cwwkAdl-rom-structure-test";
-    version = defaultVersion;
-    dontUnpack = true;
-    nativeBuildInputs = [
-      cbfstool
-      futility
-    ];
-
-    buildCommand = ''
-      set -euo pipefail
-      rom=${cwwkAdlVbootRom}/coreboot.rom
-
-      # The FMAP must describe vboot's RO + RW_A + RW_B layout, including the
-      # RW_NVRAM region required by the flash-backed VBNV.
-      cbfstool "$rom" layout > layout.txt
-      for region in GBB COREBOOT VBLOCK_A VBLOCK_B FW_MAIN_A FW_MAIN_B \
-        RW_FWID_A RW_FWID_B RW_NVRAM RECOVERY_MRC_CACHE RW_MRC_CACHE SMMSTORE; do
-        grep -q "'$region'" layout.txt
-      done
-
-      # The early stages and the read-only blobs live in COREBOOT...
-      cbfstool "$rom" print -r COREBOOT > coreboot.cbfs
-      grep -q 'fallback/romstage' coreboot.cbfs
-      grep -q 'fspm.bin' coreboot.cbfs
-      grep -q 'cpu_microcode_blob.bin' coreboot.cbfs
-
-      # ...while the RW slots carry ramstage, FSP-S and the payload.
-      for slot in A B; do
-        cbfstool "$rom" print -r "FW_MAIN_$slot" > "fw_main_$slot.cbfs"
-        grep -q 'fallback/ramstage' "fw_main_$slot.cbfs"
-        grep -q 'fallback/payload' "fw_main_$slot.cbfs"
-        grep -q 'fsps.bin' "fw_main_$slot.cbfs"
-      done
-
-      # Each VBLOCK preamble must sign its FW_MAIN body.
-      futility dump_fmap -x "$rom" VBLOCK_A FW_MAIN_A VBLOCK_B FW_MAIN_B \
-        > /dev/null
-      futility show -f FW_MAIN_A VBLOCK_A | grep -q 'Body verification succeeded'
-      futility show -f FW_MAIN_B VBLOCK_B | grep -q 'Body verification succeeded'
-
-      mkdir -p $out
-      cp "$rom" $out/coreboot.rom
-    '';
-
-    meta = {
-      description = "Structural check of the CWWK CW-ADLN-NAS vboot ROM";
-      # The test embeds the ROM, which carries the unfree Intel FSP.
-      license = [
-        lib.licenses.gpl2
-        lib.licenses.unfree
-      ];
-      maintainers = with lib.maintainers; [ tomfitzhenry ];
-    };
-  };
 in
 {
   inherit
@@ -566,13 +451,6 @@ in
     passthru = (apu2VbootRom.passthru or { }) // {
       tests = {
         "rom-structure" = apu2VbootRomStructureTest;
-      };
-    };
-  };
-  corebootVboot_cwwkAdl = cwwkAdlVbootRom // {
-    passthru = (cwwkAdlVbootRom.passthru or { }) // {
-      tests = {
-        "rom-structure" = cwwkAdlVbootRomStructureTest;
       };
     };
   };
