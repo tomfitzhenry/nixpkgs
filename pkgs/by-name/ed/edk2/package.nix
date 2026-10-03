@@ -202,50 +202,58 @@ stdenv.mkDerivation (finalAttrs: {
     {
       inherit mkDerivation;
 
-      # EDK2 UEFI firmware as a coreboot payload (UefiPayloadPkg). The build
-      # mode (e.g. `buildConfig = "DEBUG"`) can be changed via `.override`.
+      # EDK2 UEFI firmware as a coreboot payload (UefiPayloadPkg). Derivation
+      # attributes such as `buildConfig` (e.g. "DEBUG") and `buildFlags` can be
+      # changed via `.override`.
+      #
+      # NB: `overrides` is merged *inside* the attrset passed to
+      # `mkDerivation`, so `.override` reaches the build inputs rather than
+      # merely annotating the finished derivation.
       corebootPayload = lib.makeOverridable (
         overrides:
-        mkDerivation "UefiPayloadPkg/UefiPayloadPkg.dsc" (finalAttrsInner: {
-          pname = "edk2-coreboot-payload";
-          version = finalAttrs.version;
+        mkDerivation "UefiPayloadPkg/UefiPayloadPkg.dsc" (
+          finalAttrsInner:
+          {
+            pname = "edk2-coreboot-payload";
+            version = finalAttrs.version;
 
-          nativeBuildInputs = [
-            util-linux
-            nasm
-            acpica-tools
-          ];
+            nativeBuildInputs = [
+              util-linux
+              nasm
+              acpica-tools
+            ];
 
-          hardeningDisable = [
-            "format"
-            "stackprotector"
-            "pic"
-            "fortify"
-          ];
+            hardeningDisable = [
+              "format"
+              "stackprotector"
+              "pic"
+              "fortify"
+            ];
 
-          buildFlags = [ "-D BOOTLOADER=COREBOOT" ];
-          buildConfig = "RELEASE";
+            buildFlags = [ "-D BOOTLOADER=COREBOOT" ];
+            buildConfig = "RELEASE";
 
-          # coreboot always enters payloads in 32-bit protected mode, so the
-          # payload needs a 32-bit (IA32) entry point. UefiPayloadPkg built for
-          # both IA32 and X64 provides that: the IA32 SEC entry switches to
-          # long mode and hands over to the X64 DXE core.
-          arch = "IA32 X64";
+            # coreboot always enters payloads in 32-bit protected mode, so the
+            # payload needs a 32-bit (IA32) entry point. UefiPayloadPkg built for
+            # both IA32 and X64 provides that: the IA32 SEC entry switches to
+            # long mode and hands over to the X64 DXE core.
+            arch = "IA32 X64";
 
-          passthru = {
-            # The built payload, for embedding in a coreboot ROM.
-            payload = "${finalAttrsInner.finalPackage}/FV/UEFIPAYLOAD.fd";
-          };
+            passthru = {
+              # The built payload, for embedding in a coreboot ROM.
+              payload = "${finalAttrsInner.finalPackage}/FV/UEFIPAYLOAD.fd";
+            };
 
-          meta = {
-            description = "EDK2 UEFI firmware as a coreboot payload (UefiPayloadPkg)";
-            homepage = "https://github.com/tianocore/edk2";
-            license = lib.licenses.bsd2;
-            maintainers = with lib.maintainers; [ tomfitzhenry ];
-            platforms = lib.platforms.x86_64;
-          };
-        })
-        // overrides
+            meta = {
+              description = "EDK2 UEFI firmware as a coreboot payload (UefiPayloadPkg)";
+              homepage = "https://github.com/tianocore/edk2";
+              license = lib.licenses.bsd2;
+              maintainers = with lib.maintainers; [ tomfitzhenry ];
+              platforms = lib.platforms.x86_64;
+            };
+          }
+          // overrides
+        )
       ) { };
 
       # exercise a channel blocker
