@@ -7,7 +7,6 @@
   python3,
   cbfstool,
   futility,
-  git,
   openssl,
   edk2,
 }:
@@ -85,6 +84,21 @@ let
     url = "https://review.coreboot.org/intel-microcode";
     rev = "98f8d817ca3d560c48ae988bd805d1b53b48a631";
     hash = "sha256-hJfuxnHxHAxoTFAdgzontCl2pl5ad222I8BGyHO+MxQ=";
+  };
+
+  # The CWWK CW-ADLN-NAS mainboard is not in mainline 26.06. This is the
+  # author's hardware-verified branch: mainline after the 26.06 tag plus the
+  # Twin Lake variant (SuperIO COM1 console, live-dumped GPIO, USB-first EDK2
+  # boot order, CLKREQ/ASPM fixes) and, on top, the vboot Kconfig block and
+  # 16 MiB RW_AB FMAP. Pinning the branch keeps the verified ROM reproducible
+  # from nixpkgs without carrying the board as patches.
+  #
+  # https://github.com/tomfitzhenry/coreboot/tree/cwwk-adln-nas-vboot-verified
+  cwwkCorebootSrc = fetchgit {
+    url = "https://github.com/tomfitzhenry/coreboot.git";
+    rev = "e936df46ff82b00ec8515dddeb8e97f73dfab958";
+    hash = "sha256-SqOgvk4euhxqLCCfzyx81yYUsU2iOMsUrYumOELJvII=";
+    fetchSubmodules = false;
   };
 
   # Render a Kconfig value for coreboot's `.config`:
@@ -443,26 +457,22 @@ let
   # coreboot with vboot (verified boot) and the EDK2 UEFI payload for the CWWK
   # CW-ADLN-NAS, an Intel Alder Lake-N/Twin Lake (N355) NAS board.
   #
-  # Mainline coreboot 26.06 has the cwwk/adl mainboard but not this variant;
-  # Gerrit change 91908 adds it. The board's vboot Kconfig block and a 16 MiB
-  # RW_AB FMAP are added by cwwk-adl-vboot.patch. The public Intel FSP and the
-  # CPU microcode are injected from coreboot's 3rdparty submodules (`files`).
+  # Built from the author's hardware-verified branch (see `cwwkCorebootSrc`),
+  # which already contains the mainboard support, the SuperIO COM1 console, the
+  # live-dumped GPIO table and the board's vboot Kconfig block and 16 MiB RW_AB
+  # FMAP. The public Intel FSP and the CPU microcode are injected from
+  # coreboot's 3rdparty submodules (`files`).
+  #
+  # The earlier approach (Gerrit change 91908 plus local vboot patches) is
+  # superseded by this branch; the Gerrit change remains at
+  # https://review.coreboot.org/c/coreboot/+/91908.
   #
   # Runtime VBNV is stored in CMOS with a flash backup (the SoC selects
   # VBOOT_VBNV_CMOS_BACKUP_TO_FLASH), which is why the FMAP needs RW_NVRAM.
-  #
-  # https://review.coreboot.org/c/coreboot/+/91908
   cwwkAdlVbootRom = mkCoreboot {
+    src = cwwkCorebootSrc;
     defconfigFile = ./cwwk-adl-cw-adln-nas-twinlake-vboot.config;
     payload = edk2.corebootPayload.payload;
-    # Gerrit 91908 adds a binary VBT (data.vbt), which GNU patch cannot apply.
-    # It is a verbatim git-format patch, so apply it with `git apply` in
-    # prePatch (before `patches`, since the vboot patch below is based on the
-    # post-91908 tree).
-    prePatch = ''
-      git apply ${./cwwk-adl-91908.patch}
-    '';
-    patches = [ ./cwwk-adl-vboot.patch ];
     config = {
       VBOOT = "y";
       VBOOT_SLOTS_RW_AB = "y";
@@ -477,12 +487,8 @@ let
       "3rdparty/fsp" = corebootFsp;
       "3rdparty/intel-microcode" = corebootIntelMicrocode;
     };
-    # futility (used to sign the RW slots) links against OpenSSL; `git` applies
-    # the Gerrit patch above (see `prePatch`).
-    extraNativeBuildInputs = [
-      git
-      openssl
-    ];
+    # futility (used to sign the RW slots) links against OpenSSL.
+    extraNativeBuildInputs = [ openssl ];
     extraMeta = {
       description = "coreboot firmware with vboot and the EDK2 UEFI payload for the CWWK CW-ADLN-NAS (Intel Twin Lake/N355)";
     };
