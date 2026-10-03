@@ -1486,6 +1486,8 @@ with pkgs;
     extraPackages = [ ffmpeg ];
   };
 
+  inherit (callPackage ../misc/coreboot { }) mkCoreboot;
+
   inherit (callPackages ../tools/misc/coreboot-utils { })
     msrtool
     cbmem
