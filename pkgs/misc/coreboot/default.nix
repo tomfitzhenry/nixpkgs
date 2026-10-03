@@ -483,6 +483,9 @@ let
       git
       openssl
     ];
+    extraMeta = {
+      description = "coreboot firmware with vboot and the EDK2 UEFI payload for the CWWK CW-ADLN-NAS (Intel Twin Lake/N355)";
+    };
   };
 
   # Structural check of the CW-ADLN-NAS vboot ROM, runnable without hardware.
