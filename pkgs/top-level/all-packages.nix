@@ -1492,6 +1492,7 @@ with pkgs;
     corebootIntelMicrocode
     corebootVboot_apu2
     corebootVboot_cwwkAdl
+    cwwkEdk2Payload
     mkCoreboot
     ;
 

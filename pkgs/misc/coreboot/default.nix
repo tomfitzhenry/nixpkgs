@@ -454,6 +454,43 @@ let
     };
   };
 
+  # EDK2 coreboot payload whose build options match the hardware-verified
+  # in-tree build (coreboot's `payloads/external/edk2/Makefile`), so the
+  # nixpkgs ROM behaves like the one the CWWK board was tested with.
+  #
+  # The two functional options nixpkgs' default `edk2.corebootPayload` omits:
+  #   - SMMSTORE-backed UEFI variables (`VARIABLE_SUPPORT=SMMSTORE`). The board
+  #     builds coreboot with `SMMSTORE=y`, so variables must live in the
+  #     SMMSTORE region instead of the volatile EMU backend.
+  #   - `PcdFirstTimeWakeUpAPsBySipi=FALSE`, which coreboot's Makefile always
+  #     passes.
+  # The remaining options reproduce the verified ROM's user-visible behaviour:
+  # 2 second boot menu timeout, the default boot splash, a full-screen console,
+  # the "COREv4" ACPI OEM ID and SMBIOS 3.0.0 tables. `SD_MMC_TIMEOUT` shortens
+  # the SD/MMC probe timeout from edk2's 1000000 default.
+  #
+  # `BOOTSPLASH_IMAGE=TRUE` uses edk2's shipped default `MdeModulePkg/Logo/
+  # Logo.bmp`; coreboot only overrides it when `CONFIG_EDK2_BOOTSPLASH_FILE` is
+  # set, which this board does not.
+  #
+  # https://review.coreboot.org/plugins/gitiles/coreboot/+/refs/tags/26.06/payloads/external/edk2/Makefile
+  cwwkEdk2Payload = edk2.corebootPayload.override {
+    buildFlags = [
+      "-D BOOTLOADER=COREBOOT"
+      "-D VARIABLE_SUPPORT=SMMSTORE"
+      "-D PLATFORM_BOOT_TIMEOUT=2"
+      "-D BOOTSPLASH_IMAGE=TRUE"
+      "--pcd gEfiMdeModulePkgTokenSpaceGuid.PcdMaxVariableSize=0x8000"
+      "--pcd gUefiCpuPkgTokenSpaceGuid.PcdFirstTimeWakeUpAPsBySipi=FALSE"
+      "--pcd gEfiMdeModulePkgTokenSpaceGuid.PcdConOutRow=0"
+      "--pcd gEfiMdeModulePkgTokenSpaceGuid.PcdConOutColumn=0"
+      "--pcd gEfiMdeModulePkgTokenSpaceGuid.PcdAcpiDefaultOemId=COREv4"
+      "--pcd gEfiMdeModulePkgTokenSpaceGuid.PcdSmbiosVersion=0x0300"
+      "--pcd gEfiMdeModulePkgTokenSpaceGuid.PcdSmbiosDocRev=0x0"
+      "-D SD_MMC_TIMEOUT=10000"
+    ];
+  };
+
   # coreboot with vboot (verified boot) and the EDK2 UEFI payload for the CWWK
   # CW-ADLN-NAS, an Intel Alder Lake-N/Twin Lake (N355) NAS board.
   #
@@ -472,7 +509,7 @@ let
   cwwkAdlVbootRom = mkCoreboot {
     src = cwwkCorebootSrc;
     defconfigFile = ./cwwk-adl-cw-adln-nas-twinlake-vboot.config;
-    payload = edk2.corebootPayload.payload;
+    payload = cwwkEdk2Payload.payload;
     config = {
       VBOOT = "y";
       VBOOT_SLOTS_RW_AB = "y";
@@ -560,6 +597,7 @@ in
     corebootBlobs
     corebootFsp
     corebootIntelMicrocode
+    cwwkEdk2Payload
     ;
   corebootVboot_apu2 = apu2VbootRom // {
     passthru = (apu2VbootRom.passthru or { }) // {
