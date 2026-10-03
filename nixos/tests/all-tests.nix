@@ -482,6 +482,7 @@ in
   convos = runTest ./convos.nix;
   coreboot = {
     boot-uefi = runTestOn [ "x86_64-linux" ] ./coreboot/boot-uefi.nix;
+    vboot = runTestOn [ "x86_64-linux" ] ./coreboot/vboot.nix;
   };
   coredns = runTest ./coredns.nix;
   corerad = runTest ./corerad.nix;
