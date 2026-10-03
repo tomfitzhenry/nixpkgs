@@ -480,6 +480,9 @@ in
   containers-tmpfs = runTest ./containers-tmpfs.nix;
   containers-unified-hierarchy = runTest ./containers-unified-hierarchy.nix;
   convos = runTest ./convos.nix;
+  coreboot = {
+    boot-uefi = runTestOn [ "x86_64-linux" ] ./coreboot/boot-uefi.nix;
+  };
   coredns = runTest ./coredns.nix;
   corerad = runTest ./corerad.nix;
   corteza = runTest ./corteza.nix;
