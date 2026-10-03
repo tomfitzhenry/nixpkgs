@@ -54,6 +54,38 @@ let
     hash = "sha256-BZdyUPa9RD2txjFfgcyEQEG+Z6yPJpXRdwTe1ExwaSs=";
   };
 
+  # coreboot's 3rdparty/fsp submodule: the public Intel FSP binaries. Boards
+  # that use `FSP_USE_REPO` consume (e.g.) the Alder Lake-N FSP from here. FSP
+  # binaries are not free software, so they are not fetched as part of
+  # `defaultSrc`; boards that need them inject the tree via `mkCoreboot`'s
+  # `files` argument. Pinned to the rev coreboot 26.06 pins in .gitmodules.
+  #
+  # https://review.coreboot.org/plugins/gitiles/fsp
+  corebootFsp =
+    fetchgit {
+      url = "https://review.coreboot.org/fsp.git";
+      rev = "ca4f8b702db0cb4a1e5bdf5f72396faa089f4137";
+      hash = "sha256-+uqiP0B1jnyPCR0ME7LUqVAnahZzADY+jjAoaAQgm3M=";
+    }
+    // {
+      meta = {
+        description = "Mainline Intel FSP binaries (coreboot 3rdparty/fsp)";
+        homepage = "https://review.coreboot.org/plugins/gitiles/fsp";
+        # FSP binaries are distributed under Intel's restrictive FSP license.
+        license = lib.licenses.unfree;
+        maintainers = with lib.maintainers; [ tomfitzhenry ];
+      };
+    };
+
+  # coreboot's 3rdparty/intel-microcode submodule: Intel CPU microcode updates
+  # (free software). Boards with `USE_CPU_MICROCODE_CBFS_BINS` consume the
+  # microcode from here. Pinned to the rev coreboot 26.06 pins in .gitmodules.
+  corebootIntelMicrocode = fetchgit {
+    url = "https://review.coreboot.org/intel-microcode";
+    rev = "98f8d817ca3d560c48ae988bd805d1b53b48a631";
+    hash = "sha256-hJfuxnHxHAxoTFAdgzontCl2pl5ad222I8BGyHO+MxQ=";
+  };
+
   # Render a Kconfig value for coreboot's `.config`:
   # - booleans become y/n
   # - integers are written bare
@@ -411,6 +443,8 @@ in
   inherit
     mkCoreboot
     corebootBlobs
+    corebootFsp
+    corebootIntelMicrocode
     ;
   corebootVboot_apu2 = apu2VbootRom // {
     passthru = (apu2VbootRom.passthru or { }) // {

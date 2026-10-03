@@ -1488,6 +1488,8 @@ with pkgs;
 
   inherit (callPackage ../misc/coreboot { })
     corebootBlobs
+    corebootFsp
+    corebootIntelMicrocode
     corebootVboot_apu2
     mkCoreboot
     ;
