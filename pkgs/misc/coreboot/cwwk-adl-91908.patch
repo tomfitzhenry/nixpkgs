@@ -1,0 +1,732 @@
+From 17b4e2de98d1075e1f7c7496d2892f8fad0f737e Mon Sep 17 00:00:00 2001
+From: ThePlexus <31340423+ThePlexus@users.noreply.github.com>
+Date: Sat, 28 Mar 2026 13:28:32 +0000
+Subject: [PATCH] mb/cwwk/adl: add CW-ADLN-NAS Twin Lake variant support
+
+Add support for the CWWK CW-ADLN-NAS Twin Lake variant.
+
+CWWK CW-ADLN-NAS Intel Core 3 N355 has 1x DDR5 SO-DIMM slot, 6x
+SATA 6Gbps, 4x 2.5GbE Intel i226 Ethernet ports, 2x M.2 NVMe 2280
+slots and 1x PCIe slot. The second M.2 slot shares lanes with the PCIe
+slot.
+
+This variant needs LPSS UART0 console routing, and a board-specific
+VBT for display bring-up.
+
+Fan control uses the standard IT8613E Smart Auto path; this patch only
+provides the board-specific channel and curve configuration required to
+avoid full-speed fallback.
+
+The shared src/mainboard/cwwk/adl/data.vbt is the older vendor-derived
+VBT used by the existing Alder Lake CWWK variants and does not bring up
+HDMI correctly on this board. Add a variant-local VBT extracted from
+the known-good vendor firmware for board ID CWRADLNB0, BIOS version
+05.27.00.01, built 2024-11-16 13:44:14, and use it for this variant.
+
+Disable SeaBIOS PS/2 probing since this system has no PS/2 port.
+
+TEST=Flash and boot on CW-ADLN-NAS Twin Lake (Core 3 N355, 32GB
+DDR5-5600 OM32G55600SO2RX8NE11); verified LPSS UART console, HDMI
+output, Displayport Output, four i226 NICs, primary NVME port, PCI bus
+shows native SATA and JMB58x SATA, TCSS USB-C controller enumeration,
+fan control, Intel PTT with CRB TPM and measured boot and SeaBIOS boot
+
+Change-Id: I256cad8bdf99ec7881c72d946e6705005075b9f5
+Signed-off-by: ThePlexus <31340423+ThePlexus@users.noreply.github.com>
+---
+ src/mainboard/cwwk/adl/Kconfig                |  36 ++-
+ src/mainboard/cwwk/adl/Kconfig.name           |   7 +
+ src/mainboard/cwwk/adl/bootblock.c            |  16 +
+ src/mainboard/cwwk/adl/config_seabios         |   3 +
+ src/mainboard/cwwk/adl/devicetree_twl.cb      | 143 +++++++++
+ .../cw-adln-nas-twinlake/board_info.txt       |   2 +
+ .../variants/cw-adln-nas-twinlake/data.vbt    | Bin 0 -> 8737 bytes
+ .../adl/variants/cw-adln-nas-twinlake/gpio.c  | 299 ++++++++++++++++++
+ .../variants/cw-adln-nas-twinlake/romstage.c  |  28 ++
+ 9 files changed, 530 insertions(+), 4 deletions(-)
+ create mode 100644 src/mainboard/cwwk/adl/config_seabios
+ create mode 100644 src/mainboard/cwwk/adl/devicetree_twl.cb
+ create mode 100644 src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/board_info.txt
+ create mode 100644 src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/data.vbt
+ create mode 100644 src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/gpio.c
+ create mode 100644 src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/romstage.c
+
+diff --git a/src/mainboard/cwwk/adl/Kconfig b/src/mainboard/cwwk/adl/Kconfig
+index 11b8e3c9c4..6f30172dc4 100644
+--- a/src/mainboard/cwwk/adl/Kconfig
++++ b/src/mainboard/cwwk/adl/Kconfig
+@@ -3,21 +3,32 @@
+ config BOARD_CWWK_ADL_N_COMMON
+ 	def_bool y
+ 	select BOARD_ROMSIZE_KB_16384
+-	select CRB_TPM
+-	select DRIVERS_UART_8250IO
+ 	select FSP_TYPE_IOT
+ 	select HAVE_ACPI_RESUME
+ 	select HAVE_ACPI_TABLES
+-	select HAVE_INTEL_PTT
+ 	select INTEL_GMA_HAVE_VBT
+ 	select SOC_INTEL_ALDERLAKE_PCH_N
+ 	select SUPERIO_ITE_IT8613E
+ 
+ config BOARD_CWWK_CW_ADL_4L_V1
+ 	select BOARD_CWWK_ADL_N_COMMON
++	select CRB_TPM
++	select DRIVERS_UART_8250IO
++	select HAVE_INTEL_PTT
+ 
+ config BOARD_CWWK_CW_ADLNTB_1C2L_V3
+ 	select BOARD_CWWK_ADL_N_COMMON
++	select CRB_TPM
++	select DRIVERS_UART_8250IO
++	select HAVE_INTEL_PTT
++
++config BOARD_CWWK_CW_ADLN_NAS_TWINLAKE
++	select BOARD_CWWK_ADL_N_COMMON
++	select CRB_TPM
++	select HAVE_INTEL_PTT
++	select INTEL_LPSS_UART_FOR_CONSOLE
++	select NO_UART_ON_SUPERIO
++	select SOC_INTEL_TWINLAKE
+ 
+ if BOARD_CWWK_ADL_N_COMMON
+ 
+@@ -27,21 +38,38 @@ config MAINBOARD_DIR
+ config VARIANT_DIR
+ 	default "cw-adl-4l-v1.0"      if BOARD_CWWK_CW_ADL_4L_V1
+ 	default "cw-adlntb-1c2l-v3.0" if BOARD_CWWK_CW_ADLNTB_1C2L_V3
++	default "cw-adln-nas-twinlake" if BOARD_CWWK_CW_ADLN_NAS_TWINLAKE
+ 
+ config MAINBOARD_PART_NUMBER
+ 	default "CW-ADL-4L-V1.0"      if BOARD_CWWK_CW_ADL_4L_V1
+ 	default "CW-ADLNTB-1C2L-V3.0" if BOARD_CWWK_CW_ADLNTB_1C2L_V3
++	default "CW-ADLN-NAS"         if BOARD_CWWK_CW_ADLN_NAS_TWINLAKE
+ 
+ config MAINBOARD_SMBIOS_PRODUCT_NAME
+ 	default "CW-ADL-4L-V1.0"      if BOARD_CWWK_CW_ADL_4L_V1
+ 	default "CW-X86-P5-V3"        if BOARD_CWWK_CW_ADLNTB_1C2L_V3
++	default "CW-ADLN-NAS"         if BOARD_CWWK_CW_ADLN_NAS_TWINLAKE
+ 
+ config MAINBOARD_VERSION
+ 	default "CW-ADL-4L-V1.0"      if BOARD_CWWK_CW_ADL_4L_V1
+ 	default "CW-ADLNTB-1C2L-V3.0" if BOARD_CWWK_CW_ADLNTB_1C2L_V3
++	default "CW-ADLN-NAS"         if BOARD_CWWK_CW_ADLN_NAS_TWINLAKE
++
++config DEVICETREE
++	default "devicetree_twl.cb" if BOARD_CWWK_CW_ADLN_NAS_TWINLAKE
++
++config UART_FOR_CONSOLE
++	default 0 if BOARD_CWWK_CW_ADLN_NAS_TWINLAKE
++
++config PAYLOAD_CONFIGFILE
++	string
++	default "\$(top)/src/mainboard/\$(MAINBOARDDIR)/config_seabios" \
++		if BOARD_CWWK_CW_ADLN_NAS_TWINLAKE && PAYLOAD_SEABIOS
+ 
+-# Override the default variant behavior, since the data.vbt is the same
++# The NAS Twin Lake variant uses a vendor-derived VBT specific to that board.
+ config INTEL_GMA_VBT_FILE
++	default "src/mainboard/\$(MAINBOARDDIR)/variants/\$(VARIANT_DIR)/data.vbt" \
++		if BOARD_CWWK_CW_ADLN_NAS_TWINLAKE
+ 	default "src/mainboard/\$(MAINBOARDDIR)/data.vbt"
+ 
+ config NO_POST
+diff --git a/src/mainboard/cwwk/adl/Kconfig.name b/src/mainboard/cwwk/adl/Kconfig.name
+index d102e3249f..c85bf0cd87 100644
+--- a/src/mainboard/cwwk/adl/Kconfig.name
++++ b/src/mainboard/cwwk/adl/Kconfig.name
+@@ -5,3 +5,10 @@ config BOARD_CWWK_CW_ADL_4L_V1
+ 
+ config BOARD_CWWK_CW_ADLNTB_1C2L_V3
+ 	bool "CW-ADLNTB-1C2L-V3.0"
++
++config BOARD_CWWK_CW_ADLN_NAS_TWINLAKE
++	bool "CW-ADLN-NAS (Twin Lake)"
++	help
++	  CW-ADLN-NAS Twin Lake variant validated on N355 systems.
++	  N150 and other SKUs in the same chassis family are not covered
++	  by this board option until they are independently verified.
+diff --git a/src/mainboard/cwwk/adl/bootblock.c b/src/mainboard/cwwk/adl/bootblock.c
+index f19b383907..928cbb7192 100644
+--- a/src/mainboard/cwwk/adl/bootblock.c
++++ b/src/mainboard/cwwk/adl/bootblock.c
+@@ -1,6 +1,7 @@
+ /* SPDX-License-Identifier: GPL-2.0-or-later */
+ 
+ #include <bootblock_common.h>
++#include <soc/gpio.h>
+ #include <superio/ite/common/ite.h>
+ #include <superio/ite/it8613e/it8613e.h>
+ 
+@@ -8,5 +9,20 @@
+ 
+ void bootblock_mainboard_early_init(void)
+ {
++#if CONFIG(INTEL_LPSS_UART_FOR_CONSOLE)
++	/*
++	 * Route UART0 to the debug header in bootblock so early console is
++	 * available as soon as console_init() runs.
++	 */
++	static const struct pad_config early_uart_gpio_table[] = {
++		PAD_CFG_NF(GPP_H10, NONE, DEEP, NF2), /* UART0_RXD */
++		PAD_CFG_NF(GPP_H11, NONE, DEEP, NF2), /* UART0_TXD */
++	};
++
++	gpio_configure_pads(early_uart_gpio_table, ARRAY_SIZE(early_uart_gpio_table));
++#endif
++
++#if CONFIG(DRIVERS_UART_8250IO)
+ 	ite_enable_serial(UART_DEV, CONFIG_TTYS0_BASE);
++#endif
+ }
+diff --git a/src/mainboard/cwwk/adl/config_seabios b/src/mainboard/cwwk/adl/config_seabios
+new file mode 100644
+index 0000000000..c5b474eca8
+--- /dev/null
++++ b/src/mainboard/cwwk/adl/config_seabios
+@@ -0,0 +1,3 @@
++# CW-ADLN-NAS has no legacy PS/2 controller.
++# Disable SeaBIOS PS/2 probing to avoid i8042 timeout warnings.
++# CONFIG_PS2PORT is not set
+diff --git a/src/mainboard/cwwk/adl/devicetree_twl.cb b/src/mainboard/cwwk/adl/devicetree_twl.cb
+new file mode 100644
+index 0000000000..e763c78d20
+--- /dev/null
++++ b/src/mainboard/cwwk/adl/devicetree_twl.cb
+@@ -0,0 +1,143 @@
++chip soc/intel/alderlake
++
++	register "pmc_gpe0_dw0" = "GPP_B"
++	register "pmc_gpe0_dw1" = "GPP_D"
++	register "pmc_gpe0_dw2" = "GPP_E"
++
++	register "serial_io_uart_mode" = "{
++		[PchSerialIoIndexUART0] = PchSerialIoSkipInit,
++	}"
++
++	register "usb2_ports[0]" = "USB2_PORT_SHORT(OC_SKIP)"
++	register "usb2_ports[1]" = "USB2_PORT_SHORT(OC_SKIP)"
++	register "usb2_ports[2]" = "USB2_PORT_SHORT(OC_SKIP)"
++	register "usb2_ports[3]" = "USB2_PORT_SHORT(OC_SKIP)"
++	register "usb2_ports[4]" = "USB2_PORT_SHORT(OC_SKIP)"
++	register "usb2_ports[5]" = "USB2_PORT_SHORT(OC_SKIP)"
++	register "usb2_ports[6]" = "USB2_PORT_SHORT(OC_SKIP)" # microSD card reader
++	register "usb2_ports[7]" = "USB2_PORT_SHORT(OC_SKIP)"
++
++	register "pch_pcie_rp[PCH_RP(2)]" = "{
++		.clk_src = 0,
++		.clk_req = 0,
++		.flags = PCIE_RP_AER | PCIE_RP_CLK_REQ_DETECT | PCIE_RP_BUILT_IN,
++		.pcie_rp_aspm = ASPM_L0S,
++	}"
++
++	register "pch_pcie_rp[PCH_RP(3)]" = "{
++		.clk_src = 5,
++		.clk_req = 5,
++		.flags = PCIE_RP_AER | PCIE_RP_CLK_REQ_DETECT | PCIE_RP_BUILT_IN,
++		.pcie_rp_aspm = ASPM_L0S,
++	}"
++
++	register "pch_pcie_rp[PCH_RP(4)]" = "{
++		.clk_src = 6,
++		.clk_req = 6,
++		.flags = PCIE_RP_AER | PCIE_RP_CLK_REQ_DETECT | PCIE_RP_BUILT_IN,
++		.pcie_rp_aspm = ASPM_L0S,
++	}"
++
++	register "pch_pcie_rp[PCH_RP(7)]" = "{
++		.clk_src = 1,
++		.clk_req = 1,
++		.flags = PCIE_RP_AER | PCIE_RP_CLK_REQ_DETECT | PCIE_RP_BUILT_IN,
++		.pcie_rp_aspm = ASPM_L0S,
++	}"
++
++	register "pch_pcie_rp[PCH_RP(9)]" = "{
++		.clk_src = 2,
++		.clk_req = 2,
++		.flags = PCIE_RP_AER | PCIE_RP_CLK_REQ_DETECT | PCIE_RP_BUILT_IN,
++		.pcie_rp_aspm = ASPM_L0S,
++	}"
++
++	register "pch_pcie_rp[PCH_RP(10)]" = "{
++		.clk_src = 3,
++		.clk_req = 3,
++		.flags = PCIE_RP_AER | PCIE_RP_CLK_REQ_DETECT | PCIE_RP_BUILT_IN,
++		.pcie_rp_aspm = ASPM_L0S,
++	}"
++
++	register "pch_pcie_rp[PCH_RP(11)]" = "{
++		.clk_src = 4,
++		.flags = PCIE_RP_AER | PCIE_RP_CLK_REQ_UNUSED | PCIE_RP_BUILT_IN,
++		.pcie_rp_aspm = ASPM_L0S,
++	}"
++
++	register "ddi_ports_config" = "{
++		[DDI_PORT_A] = DDI_ENABLE_HPD | DDI_ENABLE_DDC,
++		[DDI_PORT_B] = DDI_ENABLE_HPD | DDI_ENABLE_DDC,
++	}"
++
++	device domain 0 on
++		device ref igpu on end
++		device ref sata on
++			register "sata_salp_support" = "1"
++			register "sata_ports_enable[0]" = "1"
++		end
++		device ref crashlog off end
++		device ref tcss_xhci on end
++		device ref xhci on end
++		device ref shared_sram on end
++		device ref uart0 on end
++		device ref pcie_rp2 on end
++		device ref pcie_rp3 on end
++		device ref pcie_rp4 on end
++		device ref pcie_rp7 on end
++		device ref pcie_rp9 on end
++		device ref pcie_rp10 on end
++		device ref pcie_rp11 on end
++		device ref pch_espi on
++			register "gen1_dec" = "0x00fc0201"
++			register "gen2_dec" = "0x003c0a01"
++			register "gen3_dec" = "0x000c0081"
++
++			chip superio/ite/it8613e
++				register "TMPIN1.mode" = "THERMAL_RESISTOR"
++
++				# CPU_FAN
++				register "FAN2.mode"            = "FAN_SMART_AUTOMATIC"
++				register "FAN2.smart.tmpin"     = "1"
++				register "FAN2.smart.tmp_off"   = "35"
++				register "FAN2.smart.tmp_start" = "40"
++				register "FAN2.smart.tmp_full"  = "88"
++				register "FAN2.smart.tmp_delta" = "2"
++				register "FAN2.smart.full_lmt"  = "1"
++				register "FAN2.smart.smoothing" = "1"
++				register "FAN2.smart.pwm_start" = "22"
++				register "FAN2.smart.slope"     = "3"
++
++				# SYS_FAN
++				register "FAN3.mode"            = "FAN_SMART_AUTOMATIC"
++				register "FAN3.smart.tmpin"     = "1"
++				register "FAN3.smart.tmp_off"   = "32"
++				register "FAN3.smart.tmp_start" = "38"
++				register "FAN3.smart.tmp_full"  = "86"
++				register "FAN3.smart.tmp_delta" = "2"
++				register "FAN3.smart.full_lmt"  = "1"
++				register "FAN3.smart.smoothing" = "1"
++				register "FAN3.smart.pwm_start" = "18"
++				register "FAN3.smart.slope"     = "3"
++				device pnp 2e.0 off end
++				device pnp 2e.1 on       # COM 1
++					io 0x60 = 0x3f8
++					irq 0x70 = 0x4
++					irq 0xf0 = 0x1
++				end
++				device pnp 2e.4 on       # Environment Controller
++                                        io 0x60 = 0x0a30
++                                        io 0x62 = 0x0a20
++                                        irq 0x70 = 0x00
++                                        irq 0x71 = 0x80
++				end
++				device pnp 2e.5 off end  # Keyboard
++				device pnp 2e.6 off end  # Mouse
++				device pnp 2e.7 off end  # GPIO
++				device pnp 2e.a off end  # CIR
++			end
++		end
++		device ref hda on end
++		device ref smbus on end
++	end
++end
+diff --git a/src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/board_info.txt b/src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/board_info.txt
+new file mode 100644
+index 0000000000..0e020527dd
+--- /dev/null
++++ b/src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/board_info.txt
+@@ -0,0 +1,2 @@
++Board name: CW-ADLN-NAS
++Release year: 2026
+diff --git a/src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/data.vbt b/src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/data.vbt
+new file mode 100644
+index 0000000000000000000000000000000000000000..474441149fcd9ddd6e4f881f3e1dd377a90661ec
+GIT binary patch
+literal 8737
+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
+G4srmBqJS;{
+
+literal 0
+HcmV?d00001
+
+diff --git a/src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/gpio.c b/src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/gpio.c
+new file mode 100644
+index 0000000000..51925b2743
+--- /dev/null
++++ b/src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/gpio.c
+@@ -0,0 +1,299 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++
++#include <console/console.h>
++#include <mainboard/gpio.h>
++#include <soc/gpio.h>
++
++/* Pad configuration was generated automatically using intelp2m utility */
++static const struct pad_config gpio_table[] = {
++
++	/* ------- GPIO Community 0 ------- */
++
++	/* ------- GPIO Group GPP_B ------- */
++	PAD_CFG_NF(GPP_B0, NONE, DEEP, NF1),	/* CORE_VID0 */
++	PAD_CFG_NF(GPP_B1, NONE, DEEP, NF1),	/* CORE_VID1 */
++	PAD_CFG_NF(GPP_B2, NONE, DEEP, NF1),	/* VRALERT# */
++	PAD_NC(GPP_B3, NONE),	/* GPIO */
++	PAD_NC(GPP_B4, NONE),	/* GPIO */
++	PAD_NC(GPP_B5, NONE),	/* GPIO */
++	PAD_NC(GPP_B6, NONE),	/* GPIO */
++	PAD_NC(GPP_B7, NONE),	/* GPIO */
++	PAD_NC(GPP_B8, NONE),	/* GPIO */
++	PAD_NC(GPP_B9, NONE),	/* GPIO */
++	PAD_NC(GPP_B10, NONE),	/* GPIO */
++	/* PAD_CFG_NF(GPP_B11, NONE, RSMRST, NF1), PMCALERT# */
++	PAD_CFG_NF(GPP_B12, NONE, DEEP, NF1),	/* SLP_S0# */
++	PAD_CFG_NF(GPP_B13, NONE, DEEP, NF1),	/* PLTRST# */
++	PAD_CFG_GPO(GPP_B14, 0, PLTRST),	/* GPIO */
++	PAD_NC(GPP_B15, NONE),	/* GPIO */
++	PAD_NC(GPP_B16, NONE),	/* GPIO */
++	PAD_NC(GPP_B17, NONE),	/* GPIO */
++	PAD_CFG_GPO(GPP_B18, 0, PLTRST),	/* GPIO */
++	PAD_NC(GPP_B19, NONE),	/* GPIO */
++	PAD_NC(GPP_B20, NONE),	/* GPIO */
++	PAD_NC(GPP_B21, NONE),	/* GPIO */
++	PAD_NC(GPP_B22, NONE),	/* GPIO */
++	PAD_CFG_GPO(GPP_B23, 1, PLTRST),	/* GPIO */
++	PAD_CFG_NF(GPP_B24, NONE, DEEP, NF1),	/* GSPI0_CLK_LOOPBK */
++	PAD_CFG_NF(GPP_B25, NONE, DEEP, NF1),	/* GSPI1_CLK_LOOPBK */
++
++	/* ------- GPIO Group GPP_T ------- */
++	PAD_NC(GPP_T0, NONE),	/* GPIO */
++	PAD_NC(GPP_T1, NONE),	/* GPIO */
++	PAD_CFG_NF(GPP_T2, DN_20K, DEEP, NF2),	/* FUSA_DIAGTEST_EN */
++	PAD_CFG_NF(GPP_T3, DN_20K, DEEP, NF2),	/* FUSA_DIAGTEST_MODE */
++	PAD_NC(GPP_T4, NONE),	/* GPIO */
++	PAD_NC(GPP_T5, NONE),	/* GPIO */
++	PAD_NC(GPP_T6, NONE),	/* GPIO */
++	PAD_NC(GPP_T7, NONE),	/* GPIO */
++	PAD_NC(GPP_T8, NONE),	/* GPIO */
++	PAD_NC(GPP_T9, NONE),	/* GPIO */
++	PAD_NC(GPP_T10, NONE),	/* GPIO */
++	PAD_NC(GPP_T11, NONE),	/* GPIO */
++	PAD_NC(GPP_T12, NONE),	/* GPIO */
++	PAD_NC(GPP_T13, NONE),	/* GPIO */
++	PAD_NC(GPP_T14, NONE),	/* GPIO */
++	PAD_NC(GPP_T15, NONE),	/* GPIO */
++
++	/* ------- GPIO Group GPP_A ------- */
++	PAD_CFG_NF(GPP_A0, UP_20K, DEEP, NF1),	/* ESPI_IO0 */
++	PAD_CFG_NF(GPP_A1, UP_20K, DEEP, NF1),	/* ESPI_IO1 */
++	PAD_CFG_NF(GPP_A2, UP_20K, DEEP, NF1),	/* ESPI_IO2 */
++	PAD_CFG_NF(GPP_A3, UP_20K, DEEP, NF1),	/* ESPI_IO3 */
++	PAD_CFG_NF(GPP_A4, UP_20K, DEEP, NF1),	/* ESPI_CS0# */
++	PAD_CFG_NF(GPP_A5, UP_20K, DEEP, NF1),	/* ESPI_ALERT0# */
++	PAD_CFG_NF(GPP_A6, UP_20K, DEEP, NF1),	/* ESPI_ALERT1# */
++	PAD_CFG_GPO(GPP_A7, 1, PLTRST),	/* GPIO */
++	PAD_NC(GPP_A8, NONE),	/* GPIO */
++	PAD_CFG_NF(GPP_A9, DN_20K, DEEP, NF1),	/* ESPI_CLK */
++	PAD_CFG_NF(GPP_A10, NONE, DEEP, NF1),	/* ESPI_RESET# */
++	PAD_NC(GPP_A11, NONE),	/* GPIO */
++	PAD_NC(GPP_A12, NONE),	/* GPIO */
++	PAD_CFG_GPO(GPP_A13, 1, DEEP),	/* GPIO */
++	PAD_NC(GPP_A14, NONE),	/* GPIO */
++	PAD_NC(GPP_A15, NONE),	/* GPIO */
++	PAD_NC(GPP_A16, NONE),	/* GPIO */
++	PAD_CFG_GPO(GPP_A17, 1, PLTRST),	/* GPIO */
++	PAD_CFG_NF(GPP_A18, NONE, DEEP, NF1),	/* DDSP_HPDB */
++	PAD_CFG_NF(GPP_A19, NONE, DEEP, NF1),	/* DDSP_HPD1 */
++	PAD_NC(GPP_A20, NONE),	/* GPIO */
++	PAD_CFG_GPO(GPP_A21, 1, PLTRST),	/* GPIO */
++	PAD_NC(GPP_A22, NONE),	/* GPIO */
++	PAD_CFG_NF(GPP_A23, UP_20K, DEEP, NF1),	/* ESPI_CS1# */
++	PAD_CFG_NF(GPP_ESPI_CLK_LOOPBK, NONE, DEEP, NF1),	/* GPP_ESPI_CLK_LOOPBK */
++
++	/* ------- GPIO Community 1 ------- */
++
++	/* ------- GPIO Group GPP_S ------- */
++	PAD_NC(GPP_S0, NONE),	/* GPIO */
++	PAD_NC(GPP_S1, NONE),	/* GPIO */
++	PAD_NC(GPP_S2, NONE),	/* GPIO */
++	PAD_NC(GPP_S3, NONE),	/* GPIO */
++	PAD_NC(GPP_S4, NONE),	/* GPIO */
++	PAD_NC(GPP_S5, NONE),	/* GPIO */
++	PAD_NC(GPP_S6, NONE),	/* GPIO */
++	PAD_NC(GPP_S7, NONE),	/* GPIO */
++
++	/* ------- GPIO Group GPP_I ------- */
++	PAD_NC(GPP_I0, NONE),	/* GPIO */
++	PAD_NC(GPP_I1, NONE),	/* GPIO */
++	PAD_NC(GPP_I2, NONE),	/* GPIO */
++	PAD_NC(GPP_I3, NONE),	/* GPIO */
++	PAD_NC(GPP_I4, NONE),	/* GPIO */
++	PAD_NC(GPP_I5, NONE),	/* GPIO */
++	PAD_NC(GPP_I6, NONE),	/* GPIO */
++	PAD_CFG_NF(GPP_I7, NONE, DEEP, NF1),	/* EMMC_CMD */
++	PAD_CFG_NF(GPP_I8, NONE, DEEP, NF1),	/* EMMC_DATA0 */
++	PAD_CFG_NF(GPP_I9, NONE, DEEP, NF1),	/* EMMC_DATA1 */
++	PAD_CFG_NF(GPP_I10, NONE, DEEP, NF1),	/* EMMC_DATA2 */
++	PAD_CFG_NF(GPP_I11, NONE, DEEP, NF1),	/* EMMC_DATA3 */
++	PAD_CFG_NF(GPP_I12, NONE, DEEP, NF1),	/* EMMC_DATA4 */
++	PAD_CFG_NF(GPP_I13, NONE, DEEP, NF1),	/* EMMC_DATA5 */
++	PAD_CFG_NF(GPP_I14, NONE, DEEP, NF1),	/* EMMC_DATA6 */
++	PAD_CFG_NF(GPP_I15, NONE, DEEP, NF1),	/* EMMC_DATA7 */
++	PAD_CFG_NF(GPP_I16, NONE, DEEP, NF1),	/* EMMC_RCLK */
++	PAD_CFG_NF(GPP_I17, NONE, DEEP, NF1),	/* EMMC_CLK */
++	PAD_CFG_NF(GPP_I18, NONE, DEEP, NF1),	/* EMMC_RESET# */
++	PAD_NC(GPP_I19, NONE),	/* GPIO */
++
++	/* ------- GPIO Group GPP_H ------- */
++	PAD_CFG_GPO(GPP_H0, 1, PLTRST),	/* GPIO */
++	PAD_CFG_GPO(GPP_H1, 0, DEEP),	/* GPIO */
++	PAD_CFG_GPO(GPP_H2, 1, DEEP),	/* GPIO */
++	PAD_NC(GPP_H3, NONE),	/* GPIO */
++	PAD_NC(GPP_H4, NONE),	/* GPIO */
++	PAD_NC(GPP_H5, NONE),	/* GPIO */
++	PAD_NC(GPP_H6, NONE),	/* GPIO */
++	PAD_NC(GPP_H7, NONE),	/* GPIO */
++	PAD_NC(GPP_H8, NONE),	/* GPIO */
++	PAD_NC(GPP_H9, NONE),	/* GPIO */
++	PAD_CFG_NF(GPP_H10, NONE, DEEP, NF2),	/* UART0_RXD */
++	PAD_CFG_NF(GPP_H11, NONE, DEEP, NF2),	/* UART0_TXD */
++	PAD_NC(GPP_H12, NONE),	/* GPIO */
++	PAD_NC(GPP_H13, NONE),	/* GPIO */
++	PAD_NC(GPP_H14, NONE),	/* GPIO */
++	PAD_CFG_NF(GPP_H15, NONE, DEEP, NF1),	/* DDPB_CTRLCLK */
++	PAD_NC(GPP_H16, NONE),	/* GPIO */
++	PAD_CFG_NF(GPP_H17, NONE, DEEP, NF1),	/* DDPB_CTRLDATA */
++	PAD_CFG_NF(GPP_H18, NONE, DEEP, NF1),	/* PROC_C10_GATE# */
++	PAD_CFG_NF(GPP_H19, NONE, DEEP, NF1),	/* SRCCLKREQ4# */
++	PAD_NC(GPP_H20, NONE),	/* GPIO */
++	PAD_NC(GPP_H21, NONE),	/* GPIO */
++	PAD_NC(GPP_H22, NONE),	/* GPIO */
++	PAD_NC(GPP_H23, NONE),	/* GPIO */
++
++	/* ------- GPIO Group GPP_D ------- */
++	PAD_NC(GPP_D0, NONE),	/* GPIO */
++	PAD_CFG_GPI_TRIG_OWN(GPP_D1, NONE, PLTRST, OFF, ACPI),	/* GPIO */
++	PAD_NC(GPP_D2, NONE),	/* GPIO */
++	PAD_NC(GPP_D3, NONE),	/* GPIO */
++	PAD_NC(GPP_D4, NONE),	/* GPIO */
++	PAD_CFG_NF(GPP_D5, NONE, DEEP, NF1),	/* SRCCLKREQ0# */
++	PAD_CFG_NF(GPP_D6, NONE, DEEP, NF1),	/* SRCCLKREQ1# */
++	PAD_CFG_NF(GPP_D7, NONE, DEEP, NF1),	/* SRCCLKREQ2# */
++	PAD_CFG_NF(GPP_D8, NONE, DEEP, NF1),	/* SRCCLKREQ3# */
++	PAD_CFG_NF(GPP_D9, NATIVE, DEEP, NF5),	/* BSSB_LS2_RX */
++	PAD_CFG_NF(GPP_D10, NATIVE, DEEP, NF5),	/* BSSB_LS2_TX */
++	PAD_CFG_NF(GPP_D11, NATIVE, DEEP, NF5),	/* BSSB_LS3_RX */
++	PAD_CFG_NF(GPP_D12, NATIVE, DEEP, NF5),	/* BSSB_LS3_TX */
++	PAD_NC(GPP_D13, NONE),	/* GPIO */
++	PAD_NC(GPP_D14, NONE),	/* GPIO */
++	PAD_NC(GPP_D15, NONE),	/* GPIO */
++	PAD_CFG_GPO(GPP_D16, 1, PLTRST),	/* GPIO */
++	PAD_NC(GPP_D17, NONE),	/* GPIO */
++	PAD_NC(GPP_D18, NONE),	/* GPIO */
++	PAD_NC(GPP_D19, NONE),	/* GPIO */
++	PAD_CFG_NF(GPP_GSPI2_CLK_LOOPBK, NONE, DEEP, NF1),	/* GPP_GSPI2_CLK_LOOPBK */
++
++	/* ------- GPIO Group vGPIO ------- */
++
++	/* ------- GPIO Community 2 ------- */
++
++	/* ------- GPIO Group GPP_GPD ------- */
++	PAD_CFG_NF(GPD0, UP_20K, PWROK, NF1),	/* BATLOW# */
++	PAD_CFG_NF(GPD1, NATIVE, PWROK, NF1),	/* ACPRESENT */
++	PAD_CFG_NF(GPD2, NATIVE, PWROK, NF1),	/* LAN_WAKE# */
++	PAD_CFG_NF(GPD3, UP_20K, PWROK, NF1),	/* PWRBTN# */
++	PAD_CFG_NF(GPD4, NONE, PWROK, NF1),	/* SLP_S3# */
++	PAD_CFG_NF(GPD5, NONE, PWROK, NF1),	/* SLP_S4# */
++	PAD_CFG_NF(GPD6, NONE, PWROK, NF1),	/* SLP_A# */
++	PAD_CFG_GPO(GPD7, 0, PWROK),	/* GPIO */
++	PAD_CFG_NF(GPD8, NONE, PWROK, NF1),	/* SUSCLK */
++	PAD_CFG_NF(GPD9, NONE, PWROK, NF1),	/* SLP_WLAN# */
++	PAD_CFG_NF(GPD10, NONE, PWROK, NF1),	/* SLP_S5# */
++	PAD_CFG_GPO(GPD11, 0, PWROK),	/* GPIO */
++	PAD_CFG_NF(GPD_INPUT3VSEL, NONE, PWROK, NF1),	/* GPD_INPUT3VSEL */
++	PAD_CFG_NF(GPD_SLP_LANB, NONE, PWROK, NF1),	/* GPD_SLP_LANB */
++	PAD_CFG_NF(GPD_SLP_SUSB, NONE, PWROK, NF1),	/* GPD_SLP_SUSB */
++	PAD_CFG_NF(GPD_WAKEB, NONE, PWROK, NF1),	/* GPD_WAKEB */
++	PAD_CFG_NF(GPD_DRAM_RESETB, NONE, PWROK, NF1),	/* GPD_DRAM_RESETB */
++
++	/* ------- GPIO Group PCIe vGPIO ------- */
++
++	/* ------- GPIO Community 4 ------- */
++
++	/* ------- GPIO Group GPP_C ------- */
++	PAD_CFG_NF(GPP_C0, NONE, DEEP, NF1),	/* SMBCLK */
++	PAD_CFG_NF(GPP_C1, NONE, DEEP, NF1),	/* SMBDATA */
++	PAD_CFG_GPO(GPP_C2, 0, DEEP),	/* GPIO */
++	PAD_CFG_NF(GPP_C3, NONE, DEEP, NF1),	/* SML0CLK */
++	PAD_CFG_NF(GPP_C4, NONE, DEEP, NF1),	/* SML0DATA */
++	PAD_CFG_GPO(GPP_C5, 0, DEEP),	/* GPIO */
++	PAD_CFG_NF(GPP_C6, NONE, DEEP, NF1),	/* SML1CLK */
++	PAD_CFG_NF(GPP_C7, NONE, DEEP, NF1),	/* SML1DATA */
++	PAD_NC(GPP_C8, NONE),	/* GPIO */
++	PAD_NC(GPP_C9, NONE),	/* GPIO */
++	PAD_NC(GPP_C10, NONE),	/* GPIO */
++	PAD_NC(GPP_C11, NONE),	/* GPIO */
++	PAD_NC(GPP_C12, NONE),	/* GPIO */
++	PAD_NC(GPP_C13, NONE),	/* GPIO */
++	PAD_NC(GPP_C14, NONE),	/* GPIO */
++	PAD_NC(GPP_C15, NONE),	/* GPIO */
++	PAD_NC(GPP_C16, NONE),	/* GPIO */
++	PAD_NC(GPP_C17, NONE),	/* GPIO */
++	PAD_NC(GPP_C18, NONE),	/* GPIO */
++	PAD_NC(GPP_C19, NONE),	/* GPIO */
++	PAD_NC(GPP_C20, NONE),	/* GPIO */
++	PAD_NC(GPP_C21, NONE),	/* GPIO */
++	PAD_NC(GPP_C22, NONE),	/* GPIO */
++	PAD_NC(GPP_C23, NONE),	/* GPIO */
++
++	/* ------- GPIO Group GPP_F ------- */
++	PAD_CFG_NF(GPP_F0, NONE, DEEP, NF1),	/* CNV_BRI_DT */
++	PAD_CFG_NF(GPP_F1, UP_20K, DEEP, NF1),	/* CNV_BRI_RSP */
++	PAD_CFG_NF(GPP_F2, NONE, DEEP, NF1),	/* CNV_RGI_DT */
++	PAD_CFG_NF(GPP_F3, UP_20K, DEEP, NF1),	/* CNV_RGI_RSP */
++	PAD_CFG_NF(GPP_F4, NONE, DEEP, NF1),	/* CNV_RF_RESET# */
++	PAD_CFG_NF(GPP_F5, NONE, DEEP, NF2),	/* MODEM_CLKREQ */
++	PAD_NC(GPP_F6, NONE),	/* GPIO */
++	PAD_CFG_GPO(GPP_F7, 0, DEEP),	/* GPIO */
++	PAD_NC(GPP_F8, NONE),	/* GPIO */
++	PAD_CFG_NF(GPP_F9, NONE, DEEP, NF1),	/* BOOTMPC */
++	PAD_CFG_GPO(GPP_F10, 1, PLTRST),	/* GPIO */
++	PAD_NC(GPP_F11, NONE),	/* GPIO */
++	PAD_NC(GPP_F12, NONE),	/* GPIO */
++	PAD_NC(GPP_F13, NONE),	/* GPIO */
++	PAD_NC(GPP_F14, NONE),	/* GPIO */
++	PAD_NC(GPP_F15, NONE),	/* GPIO */
++	PAD_NC(GPP_F16, NONE),	/* GPIO */
++	PAD_NC(GPP_F17, NONE),	/* GPIO */
++	PAD_NC(GPP_F18, NONE),	/* GPIO */
++	PAD_NC(GPP_F19, NONE),	/* GPIO */
++	PAD_CFG_NF(GPP_F20, NONE, DEEP, NF1),	/* Reserved */
++	PAD_CFG_NF(GPP_F21, NONE, DEEP, NF1),	/* Reserved */
++	PAD_NC(GPP_F22, NONE),	/* GPIO */
++	PAD_NC(GPP_F23, NONE),	/* GPIO */
++	PAD_NC(GPP_F_CLK_LOOPBK, NONE),	/* GPIO */
++
++	/* ------- GPIO Group GPP_HVCMOS ------- */
++	PAD_CFG_NF(GPP_L_BKLTEN, NONE, DEEP, NF1),	/* n/a */
++	PAD_CFG_NF(GPP_L_BKLTCTL, NONE, DEEP, NF1),	/* n/a */
++	PAD_CFG_NF(GPP_L_VDDEN, NONE, DEEP, NF1),	/* n/a */
++	PAD_CFG_NF(GPP_SYS_PWROK, NONE, DEEP, NF1),	/* n/a */
++	PAD_CFG_NF(GPP_SYS_RESETB, NONE, DEEP, NF1),	/* n/a */
++	PAD_CFG_NF(GPP_MLK_RSTB, NONE, DEEP, NF1),	/* n/a */
++
++	/* ------- GPIO Group GPP_E ------- */
++	PAD_NC(GPP_E0, NONE),	/* GPIO */
++	PAD_NC(GPP_E1, NONE),	/* GPIO */
++	PAD_NC(GPP_E2, NONE),	/* GPIO */
++	PAD_CFG_GPO(GPP_E3, 1, DEEP),	/* GPIO */
++	PAD_NC(GPP_E4, NONE),	/* GPIO */
++	PAD_NC(GPP_E5, NONE),	/* GPIO */
++	PAD_CFG_GPO(GPP_E6, 0, DEEP),	/* GPIO */
++	PAD_NC(GPP_E7, NONE),	/* GPIO */
++	PAD_NC(GPP_E8, NONE),	/* GPIO */
++	PAD_NC(GPP_E9, NONE),	/* GPIO */
++	PAD_NC(GPP_E10, NONE),	/* GPIO */
++	PAD_NC(GPP_E11, NONE),	/* GPIO */
++	PAD_NC(GPP_E12, NONE),	/* GPIO */
++	PAD_NC(GPP_E13, NONE),	/* GPIO */
++	PAD_CFG_NF(GPP_E14, NONE, DEEP, NF1),	/* DDSP_HPDA */
++	PAD_CFG_GPO(GPP_E15, 1, PLTRST),	/* GPIO */
++	PAD_CFG_GPO(GPP_E16, 0, PLTRST),	/* GPIO */
++	PAD_NC(GPP_E17, NONE),	/* GPIO */
++	PAD_CFG_NF(GPP_E18, NATIVE, DEEP, NF5),	/* BSSB_LS0_RX */
++	PAD_CFG_NF(GPP_E19, NATIVE, DEEP, NF5),	/* BSSB_LS0_TX */
++	PAD_CFG_GPO(GPP_E20, 1, PLTRST),	/* GPIO */
++	PAD_CFG_GPO(GPP_E21, 0, PLTRST),	/* GPIO */
++	PAD_CFG_NF(GPP_E22, DN_20K, DEEP, NF1),	/* DDPA_CTRLCLK */
++	PAD_CFG_NF(GPP_E23, NONE, DEEP, NF1),	/* DDPA_CTRLDATA */
++	PAD_NC(GPP_E_CLK_LOOPBK, NONE),	/* GPIO */
++
++	/* ------- GPIO Community 5 ------- */
++
++	/* ------- GPIO Group GPP_R ------- */
++	PAD_CFG_NF(GPP_R0, NONE, DEEP, NF1),	/* HDA_BCLK */
++	PAD_CFG_NF(GPP_R1, NATIVE, DEEP, NF1),	/* HDA_SYNC */
++	PAD_CFG_NF(GPP_R2, NATIVE, DEEP, NF1),	/* HDA_SDO */
++	PAD_CFG_NF(GPP_R3, NATIVE, DEEP, NF1),	/* HDA_SDI0 */
++	PAD_CFG_NF(GPP_R4, NONE, DEEP, NF1),	/* HDA_RST# */
++	PAD_NC(GPP_R5, NONE),	/* GPIO */
++	PAD_NC(GPP_R6, NONE),	/* GPIO */
++	PAD_NC(GPP_R7, NONE),	/* GPIO */
++};
++
++void mainboard_configure_gpios(void)
++{
++	gpio_configure_pads(gpio_table, ARRAY_SIZE(gpio_table));
++}
+diff --git a/src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/romstage.c b/src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/romstage.c
+new file mode 100644
+index 0000000000..ac50fb0965
+--- /dev/null
++++ b/src/mainboard/cwwk/adl/variants/cw-adln-nas-twinlake/romstage.c
+@@ -0,0 +1,28 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++
++#include <fsp/api.h>
++#include <soc/meminit.h>
++#include <soc/romstage.h>
++
++void mainboard_memory_init_params(FSPM_UPD *memupd)
++{
++	static const struct mb_cfg ddr5_mem_config = {
++		.type = MEM_TYPE_DDR5,
++
++		.ect = true, /* Early Command Training */
++
++		.UserBd = BOARD_TYPE_MOBILE,
++
++		.LpDdrDqDqsReTraining = 1,
++	};
++
++	const struct mem_spd dimm_module_spd_info = {
++		.topo = MEM_TOPO_DIMM_MODULE,
++		.smbus = {
++			[0] = { .addr_dimm[0] = 0x50, },
++		},
++	};
++
++	const bool half_populated = false;
++	memcfg_init(memupd, &ddr5_mem_config, &dimm_module_spd_info, half_populated);
++}
+-- 
+2.55.0
+

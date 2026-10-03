@@ -1,0 +1,71 @@
+diff --git a/src/mainboard/cwwk/adl/Kconfig b/src/mainboard/cwwk/adl/Kconfig
+index 6f30172dc4..f43a74aa36 100644
+--- a/src/mainboard/cwwk/adl/Kconfig
++++ b/src/mainboard/cwwk/adl/Kconfig
+@@ -72,6 +72,20 @@ config INTEL_GMA_VBT_FILE
+ 		if BOARD_CWWK_CW_ADLN_NAS_TWINLAKE
+ 	default "src/mainboard/\$(MAINBOARDDIR)/data.vbt"
+ 
++config VBOOT
++	select GBB_FLAG_DISABLE_EC_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_FWMP
++	select GBB_FLAG_DISABLE_LID_SHUTDOWN
++	select GBB_FLAG_DISABLE_PD_SOFTWARE_SYNC
++	select HAS_RECOVERY_MRC_CACHE
++	select VBOOT_CLEAR_RECOVERY_IN_RAMSTAGE
++	select VBOOT_NO_BOARD_SUPPORT
++	select VBOOT_SLOTS_RW_AB
++
++config FMDFILE
++	string
++	default "src/mainboard/\$(CONFIG_MAINBOARD_DIR)/vboot-rwab.fmd" if VBOOT && VBOOT_SLOTS_RW_AB
++
+ config NO_POST
+ 	default y
+ 
+diff --git a/src/mainboard/cwwk/adl/vboot-rwab.fmd b/src/mainboard/cwwk/adl/vboot-rwab.fmd
+new file mode 100644
+index 0000000000..fc2e230491
+--- /dev/null
++++ b/src/mainboard/cwwk/adl/vboot-rwab.fmd
+@@ -0,0 +1,40 @@
++FLASH 16M {
++	SI_ALL 0x600000 {
++		SI_DESC 4K
++		SI_ME
++	}
++
++	RW_MISC 0x50000 {
++		UNIFIED_MRC_CACHE(PRESERVE) {
++			RECOVERY_MRC_CACHE 0x20000
++			RW_MRC_CACHE 0x20000
++		}
++		RW_NVRAM(PRESERVE) 0x6000
++	}
++
++	SMMSTORE(PRESERVE) 0x80000
++
++	RW_SECTION_A 0x298000 {
++		VBLOCK_A 0x10000
++		FW_MAIN_A(CBFS)
++		RW_FWID_A 0x100
++	}
++
++	RW_SECTION_B 0x298000 {
++		VBLOCK_B 0x10000
++		FW_MAIN_B(CBFS)
++		RW_FWID_B 0x100
++	}
++
++	# Make WP_RO align with the SPI vendor memory-protected range; the
++	# descriptor/ME live below it and the RW slots above it.
++	WP_RO 0x400000 {
++		RO_SECTION {
++			FMAP 0x800
++			RO_FRID 0x100
++			RO_FRID_PAD 0x700
++			GBB 0x3000
++			COREBOOT(CBFS)
++		}
++	}
++}

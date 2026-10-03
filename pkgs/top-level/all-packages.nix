@@ -1491,6 +1491,7 @@ with pkgs;
     corebootFsp
     corebootIntelMicrocode
     corebootVboot_apu2
+    corebootVboot_cwwkAdl
     mkCoreboot
     ;
 

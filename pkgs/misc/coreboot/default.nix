@@ -7,6 +7,7 @@
   python3,
   cbfstool,
   futility,
+  git,
   openssl,
   edk2,
 }:
@@ -437,7 +438,51 @@ let
       ];
       maintainers = with lib.maintainers; [ tomfitzhenry ];
     };
+  };  # coreboot with vboot (verified boot) and the EDK2 UEFI payload for the CWWK
+  # CW-ADLN-NAS, an Intel Alder Lake-N/Twin Lake (N355) NAS board.
+  #
+  # Mainline coreboot 26.06 has the cwwk/adl mainboard but not this variant;
+  # Gerrit change 91908 adds it. The board's vboot Kconfig block and a 16 MiB
+  # RW_AB FMAP are added by cwwk-adl-vboot.patch. The public Intel FSP and the
+  # CPU microcode are injected from coreboot's 3rdparty submodules (`files`).
+  #
+  # Runtime VBNV is stored in CMOS with a flash backup (the SoC selects
+  # VBOOT_VBNV_CMOS_BACKUP_TO_FLASH), which is why the FMAP needs RW_NVRAM.
+  #
+  # https://review.coreboot.org/c/coreboot/+/91908
+  cwwkAdlVbootRom = mkCoreboot {
+    defconfigFile = ./cwwk-adl-cw-adln-nas-twinlake-vboot.config;
+    payload = edk2.corebootPayload.payload;
+    # Gerrit 91908 adds a binary VBT (data.vbt), which GNU patch cannot apply.
+    # It is a verbatim git-format patch, so apply it with `git apply` in
+    # prePatch (before `patches`, since the vboot patch below is based on the
+    # post-91908 tree).
+    prePatch = ''
+      git apply ${./cwwk-adl-91908.patch}
+    '';
+    patches = [ ./cwwk-adl-vboot.patch ];
+    config = {
+      VBOOT = "y";
+      VBOOT_SLOTS_RW_AB = "y";
+      # EDK2 stores its UEFI variables in SMMSTORE; the 0x80000 default size
+      # matches the SMMSTORE region in the FMAP.
+      SMMSTORE = "y";
+      # Assemble the platform microcode from 3rdparty/intel-microcode.
+      CPU_MICROCODE_CBFS_DEFAULT_BINS = "y";
+      DEFAULT_CONSOLE_LOGLEVEL_8 = "y";
+    };
+    files = {
+      "3rdparty/fsp" = corebootFsp;
+      "3rdparty/intel-microcode" = corebootIntelMicrocode;
+    };
+    # futility (used to sign the RW slots) links against OpenSSL; `git` applies
+    # the Gerrit patch above (see `prePatch`).
+    extraNativeBuildInputs = [
+      git
+      openssl
+    ];
   };
+
 in
 {
   inherit
@@ -453,4 +498,5 @@ in
       };
     };
   };
+  corebootVboot_cwwkAdl = cwwkAdlVbootRom;
 }
