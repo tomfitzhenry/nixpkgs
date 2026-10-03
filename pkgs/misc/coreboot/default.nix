@@ -345,12 +345,78 @@ let
     extraNativeBuildInputs = [ openssl ];
   };
 
-  corebootVboot_apu2 = apu2VbootRom;
+  # Structural check of the APU2 vboot ROM, runnable without hardware (there is
+  # no APU2 QEMU model). It asserts that the vboot RW_AB FMAP and the signed
+  # firmware slots are present, that the read-only files (AGESA, spd.bin,
+  # romstage) are kept out of the RW slots, and that each VBLOCK signs its
+  # FW_MAIN body.
+  apu2VbootRomStructureTest = stdenv.mkDerivation {
+    pname = "corebootVboot_apu2-rom-structure-test";
+    version = defaultVersion;
+    dontUnpack = true;
+    nativeBuildInputs = [
+      cbfstool
+      futility
+    ];
+
+    buildCommand = ''
+      set -euo pipefail
+      rom=${apu2VbootRom}/coreboot.rom
+
+      # The FMAP must describe vboot's RO + RW_A + RW_B layout.
+      cbfstool "$rom" layout > layout.txt
+      for region in GBB COREBOOT VBLOCK_A VBLOCK_B FW_MAIN_A FW_MAIN_B \
+        RW_FWID_A RW_FWID_B; do
+        grep -q "'$region'" layout.txt
+      done
+
+      # AGESA, spd.bin and romstage are read-only: present in COREBOOT...
+      cbfstool "$rom" print -r COREBOOT > coreboot.cbfs
+      grep -q '^AGESA' coreboot.cbfs
+      grep -q 'spd.bin' coreboot.cbfs
+      grep -q 'fallback/romstage' coreboot.cbfs
+
+      # ...and absent from both RW slots, which instead carry the payload.
+      for slot in A B; do
+        cbfstool "$rom" print -r "FW_MAIN_$slot" > "fw_main_$slot.cbfs"
+        grep -q 'fallback/ramstage' "fw_main_$slot.cbfs"
+        grep -q 'fallback/payload' "fw_main_$slot.cbfs"
+        ! grep -q '^AGESA' "fw_main_$slot.cbfs"
+        ! grep -q 'spd.bin' "fw_main_$slot.cbfs"
+        ! grep -q 'fallback/romstage' "fw_main_$slot.cbfs"
+      done
+
+      # Each VBLOCK preamble must sign its FW_MAIN body.
+      futility dump_fmap -x "$rom" VBLOCK_A FW_MAIN_A VBLOCK_B FW_MAIN_B \
+        > /dev/null
+      futility show -f FW_MAIN_A VBLOCK_A | grep -q 'Body verification succeeded'
+      futility show -f FW_MAIN_B VBLOCK_B | grep -q 'Body verification succeeded'
+
+      mkdir -p $out
+      cp "$rom" $out/coreboot.rom
+    '';
+
+    meta = {
+      description = "Structural check of the PC Engines APU2 vboot ROM";
+      # The test embeds the ROM, which carries the unfree AGESA blob.
+      license = [
+        lib.licenses.gpl2
+        lib.licenses.unfree
+      ];
+      maintainers = with lib.maintainers; [ tomfitzhenry ];
+    };
+  };
 in
 {
   inherit
     mkCoreboot
     corebootBlobs
-    corebootVboot_apu2
     ;
+  corebootVboot_apu2 = apu2VbootRom // {
+    passthru = (apu2VbootRom.passthru or { }) // {
+      tests = {
+        "rom-structure" = apu2VbootRomStructureTest;
+      };
+    };
+  };
 }
