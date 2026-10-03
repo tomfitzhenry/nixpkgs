@@ -6,7 +6,9 @@
   pkg-config,
   python3,
   cbfstool,
+  futility,
   openssl,
+  edk2,
 }:
 
 let
@@ -22,6 +24,26 @@ let
     hash = "sha256-lnO2U/VZC5IhvTF0ZGfoy4K/1YXojeMVIdcBi8rAOFo=";
     fetchSubmodules = false;
   };
+
+  # coreboot's 3rdparty/blobs repository: binary blobs (e.g. AGESA, Intel ME,
+  # FSP) required by some mainboards. It is not fetched as part of `defaultSrc`
+  # because the blobs are not free software; boards that need them inject the
+  # relevant parts via `mkCoreboot`'s `files` argument.
+  corebootBlobs =
+    fetchgit {
+      url = "https://github.com/coreboot/blobs.git";
+      rev = "4a8de0324e7d389454ec33cdf66939b653bf6800";
+      hash = "sha256-UgerWpdaX0/Lwyx6BJ8AmX1fAsuFHwUmB11633pG+yo=";
+    }
+    // {
+      meta = {
+        description = "Binary blobs required by some coreboot mainboards";
+        homepage = "https://review.coreboot.org/plugins/gitiles/blobs";
+        # Blob licenses vary, but none of them are free software.
+        license = lib.licenses.unfree;
+        maintainers = with lib.maintainers; [ tomfitzhenry ];
+      };
+    };
 
   # cbfstool links against vboot's host library, so every coreboot build needs
   # it. Unlike the other 3rdparty submodules it is free software (BSD), so it
@@ -176,122 +198,159 @@ let
       # links against OpenSSL's libcrypto. CHROMEOS implies VBOOT in Kconfig.
       usesVboot = (config'.VBOOT or "n") == "y" || (config'.CHROMEOS or "n") == "y";
     in
-    stdenv.mkDerivation (finalAttrs: {
-      pname = "coreboot-${if defconfig != null then defconfig else "custom"}";
-      version = if version == null then defaultVersion else version;
-      src = if src == null then defaultSrc else src;
+    stdenv.mkDerivation (
+      finalAttrs:
+      {
+        pname = "coreboot-${if defconfig != null then defconfig else "custom"}";
+        version = if version == null then defaultVersion else version;
+        src = if src == null then defaultSrc else src;
 
-      nativeBuildInputs = [
-        coreboot-toolchain.i386
-        pkg-config
-        python3
-      ]
-      ++ lib.optional (fmap' != null) cbfstool
-      ++ lib.optional usesVboot openssl
-      ++ extraNativeBuildInputs;
+        nativeBuildInputs = [
+          coreboot-toolchain.i386
+          pkg-config
+          python3
+        ]
+        ++ lib.optional (fmap' != null) cbfstool
+        ++ lib.optional usesVboot openssl
+        ++ extraNativeBuildInputs;
 
-      enableParallelBuilding = true;
-      dontStrip = true;
-      dontPatchELF = true;
+        enableParallelBuilding = true;
+        dontStrip = true;
+        dontPatchELF = true;
 
-      postPatch = ''
-        ${lib.concatStringsSep "\n" (
-          lib.mapAttrsToList (path: v: ''
-            mkdir -p "$(dirname '${path}')"
-            # -T so the file/dir lands at `path` even when it already exists
-            # (e.g. the empty submodule dirs left by fetchSubmodules = false).
-            cp -rT ${v} '${path}'
-          '') allFiles
-        )}
-        ${lib.optionalString (fmap' != null) ''
-          # Link the slot-selection override into every stage; coreboot looks
-          # up the boot region once per stage.
-          printf 'all-y += fmap_boot.c\n' >> ${fmap'.mainboardDir}/Makefile.mk
-        ''}
-        patchShebangs util/xcompile/xcompile
-        patchShebangs util/genbuild_h/genbuild_h.sh
-      ''
-      # Kept out of the preceding string so non-vboot builds are unchanged.
-      + lib.optionalString usesVboot ''
-        # vboot's build scripts (e.g. scripts/getversion.sh) run directly
-        # during the futility build and need their interpreters patched.
-        patchShebangs 3rdparty/vboot
-        # glibc 2.44 (C23) makes strchr()/strrchr() preserve the constness of
-        # their argument, so vboot's futility (which assigns the result to a
-        # `char *`) now trips -Werror=discarded-qualifiers. Keep the warning
-        # but don't let it fail the build.
-        substituteInPlace util/futility/Makefile.mk \
-          --replace-fail \
-            'WERROR="-Werror -Wno-deprecated-declarations"' \
-            'WERROR="-Werror -Wno-deprecated-declarations -Wno-error=discarded-qualifiers"'
-      '';
+        postPatch = ''
+          ${lib.concatStringsSep "\n" (
+            lib.mapAttrsToList (path: v: ''
+              mkdir -p "$(dirname '${path}')"
+              # -T so the file/dir lands at `path` even when it already exists
+              # (e.g. the empty submodule dirs left by fetchSubmodules = false).
+              cp -rT ${v} '${path}'
+            '') allFiles
+          )}
+          ${lib.optionalString (fmap' != null) ''
+            # Link the slot-selection override into every stage; coreboot looks
+            # up the boot region once per stage.
+            printf 'all-y += fmap_boot.c\n' >> ${fmap'.mainboardDir}/Makefile.mk
+          ''}
+          patchShebangs util/xcompile/xcompile
+          patchShebangs util/genbuild_h/genbuild_h.sh
+        ''
+        # Kept out of the preceding string so non-vboot builds are unchanged.
+        + lib.optionalString usesVboot ''
+          # vboot's build scripts (e.g. scripts/getversion.sh) run directly
+          # during the futility build and need their interpreters patched.
+          patchShebangs 3rdparty/vboot
+          # glibc 2.44 (C23) makes strchr()/strrchr() preserve the constness of
+          # their argument, so vboot's futility (which assigns the result to a
+          # `char *`) now trips -Werror=discarded-qualifiers. Keep the warning
+          # but don't let it fail the build.
+          substituteInPlace util/futility/Makefile.mk \
+            --replace-fail \
+              'WERROR="-Werror -Wno-deprecated-declarations"' \
+              'WERROR="-Werror -Wno-deprecated-declarations -Wno-error=discarded-qualifiers"'
+        '';
 
-      configurePhase = ''
-        runHook preConfigure
+        configurePhase = ''
+          runHook preConfigure
 
-        ${
-          if defconfigFile != null then
-            # -m so the resulting .config is writable (store paths are 0444)
-            "install -m 0644 ${defconfigFile} .config"
-          else
-            "cp configs/config.${defconfig} .config"
+          ${
+            if defconfigFile != null then
+              # -m so the resulting .config is writable (store paths are 0444)
+              "install -m 0644 ${defconfigFile} .config"
+            else
+              "cp configs/config.${defconfig} .config"
+          }
+
+          ${lib.optionalString hasPayload ''
+            sed -i -e '/^CONFIG_PAYLOAD_NONE=y$/d' .config
+          ''}
+
+          ${lib.concatStringsSep "\n" (
+            lib.mapAttrsToList (
+              name: value: "printf '%s\\n' '${configName name}=${renderValue value}' >> .config"
+            ) config'
+          )}
+
+          make olddefconfig
+
+          runHook postConfigure
+        '';
+
+        postBuild = lib.optionalString (fmap' != null) ''
+          # Populate the fallback slot with a copy of the normal slot, so both
+          # are bootable from the start.
+          cbfstool build/coreboot.rom copy -r ${fmap'.fallbackRegion} -R ${fmap'.normalRegion}
+        '';
+
+        makeFlags = [
+          "BUILD_TIMELESS=1"
+          "CONFIG_ANY_TOOLCHAIN=y"
+        ]
+        ++ extraMakeFlags;
+
+        installPhase = ''
+          runHook preInstall
+
+          mkdir -p ${installDir}
+          cp ${lib.concatStringsSep " " filesToInstall} ${installDir}
+
+          runHook postInstall
+        '';
+
+        meta = {
+          homepage = "https://www.coreboot.org";
+          description = "Coreboot firmware";
+          license = [ lib.licenses.gpl2 ] ++ (fileLicenses allFiles);
+          maintainers = with lib.maintainers; [ tomfitzhenry ];
         }
-
-        ${lib.optionalString hasPayload ''
-          sed -i -e '/^CONFIG_PAYLOAD_NONE=y$/d' .config
-        ''}
-
-        ${lib.concatStringsSep "\n" (
-          lib.mapAttrsToList (
-            name: value: "printf '%s\\n' '${configName name}=${renderValue value}' >> .config"
-          ) config'
-        )}
-
-        make olddefconfig
-
-        runHook postConfigure
-      '';
-
-      postBuild = lib.optionalString (fmap' != null) ''
-        # Populate the fallback slot with a copy of the normal slot, so both
-        # are bootable from the start.
-        cbfstool build/coreboot.rom copy -r ${fmap'.fallbackRegion} -R ${fmap'.normalRegion}
-      '';
-
-      makeFlags = [
-        "BUILD_TIMELESS=1"
-        "CONFIG_ANY_TOOLCHAIN=y"
-      ]
-      ++ extraMakeFlags;
-
-      installPhase = ''
-        runHook preInstall
-
-        mkdir -p ${installDir}
-        cp ${lib.concatStringsSep " " filesToInstall} ${installDir}
-
-        runHook postInstall
-      '';
-
-      meta = {
-        homepage = "https://www.coreboot.org";
-        description = "Coreboot firmware";
-        license = [ lib.licenses.gpl2 ] ++ (fileLicenses allFiles);
-        maintainers = with lib.maintainers; [ tomfitzhenry ];
+        // extraMeta;
       }
-      // extraMeta;
-    })
-    // removeAttrs args [
-      "extraMeta"
-      "defconfig"
-      "defconfigFile"
-      "files"
-      "fmap"
-      "payload"
-      "extraNativeBuildInputs"
-    ]
+      // removeAttrs args [
+        "config"
+        "extraMeta"
+        "defconfig"
+        "defconfigFile"
+        "files"
+        "fmap"
+        "payload"
+        "extraNativeBuildInputs"
+      ]
+    )
   );
+  # coreboot with vboot (verified boot) and the EDK2 UEFI payload for the PC
+  # Engines APU2, flashed as a full 8 MiB RW_AB image.
+  #
+  # Mainline coreboot does not support vboot on this board; the patch ports the
+  # pcengines fork's support (FMAP, mainboard Kconfig and AMDFW_OUTSIDE_CBFS)
+  # onto current mainline. The APU2's AGESA blob is redistributable but under a
+  # restrictive AMD license, so the ROM is unfree and excluded from caches.
+  #
+  # https://github.com/pcengines/coreboot/blob/8d3e714804b1b2bb5bc89e3ffd9cb3c34f8eb0c6/src/mainboard/pcengines/apu2/Kconfig
+  apu2VbootRom = mkCoreboot {
+    defconfig = "pcengines_apu2_vboot";
+    payload = edk2.corebootPayload.payload;
+    config = {
+      VBOOT = "y";
+      VBOOT_SLOTS_RW_AB = "y";
+      # The APU2 defconfig builds secondary payloads (iPXE, Memtest86+) by
+      # fetching their sources from the network at build time; disable them.
+      PXE = "n";
+      MEMTEST_SECONDARY_PAYLOAD = "n";
+    };
+    files = {
+      "3rdparty/blobs" = corebootBlobs;
+    };
+    patches = [ ./apu2-vboot.patch ];
+    # amdfwtool, which assembles the AGESA stage, links against OpenSSL.
+    extraNativeBuildInputs = [ openssl ];
+  };
+
+  corebootVboot_apu2 = apu2VbootRom;
 in
 {
-  inherit mkCoreboot;
+  inherit
+    mkCoreboot
+    corebootBlobs
+    corebootVboot_apu2
+    ;
 }

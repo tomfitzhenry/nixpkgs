@@ -1,0 +1,191 @@
+diff --git a/configs/config.pcengines_apu2_vboot b/configs/config.pcengines_apu2_vboot
+new file mode 100644
+index 0000000000..402db89c24
+--- /dev/null
++++ b/configs/config.pcengines_apu2_vboot
+@@ -0,0 +1,12 @@
++CONFIG_VENDOR_PCENGINES=y
++CONFIG_BOARD_PCENGINES_APU2=y
++CONFIG_APU2_PINMUX_UART_C=y
++CONFIG_APU2_PINMUX_UART_D=y
++CONFIG_NO_GFX_INIT=y
++CONFIG_SEABIOS_ADD_SERCON_PORT_FILE=y
++CONFIG_VBOOT=y
++CONFIG_VBOOT_SLOTS_RW_AB=y
++# Secondary payloads fetch their sources over the network at build time.
++# CONFIG_PXE is not set
++# CONFIG_BUILD_IPXE is not set
++# CONFIG_MEMTEST_SECONDARY_PAYLOAD is not set
+diff --git a/src/mainboard/pcengines/apu2/Kconfig b/src/mainboard/pcengines/apu2/Kconfig
+index 381bfcbd80..04f64e64b2 100644
+--- a/src/mainboard/pcengines/apu2/Kconfig
++++ b/src/mainboard/pcengines/apu2/Kconfig
+@@ -103,4 +103,33 @@ config AGESA_USE_1_0_0_4_HEADER
+ 	  revisions. This option removes the changes in headers introduced
+ 	  with AGESA 1.0.0.A to fit the 1.0.0.4 revision.
+ 
++config VBOOT
++	select VBOOT_NO_BOARD_SUPPORT
++	select VBOOT_STARTS_IN_ROMSTAGE
++	select VBOOT_VBNV_CMOS
++	select GBB_FLAG_DISABLE_LID_SHUTDOWN
++	select GBB_FLAG_DISABLE_PD_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_EC_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_FWMP
++	select RTC
++	select AMDFW_OUTSIDE_CBFS
++
++config FMDFILE
++	string
++	default "src/mainboard/\$(CONFIG_MAINBOARD_DIR)/vboot-rw-ab.fmd" if VBOOT
++
++config VBOOT_VBNV_OFFSET
++	hex
++	default 0x2D8 if VBOOT
++
++config RO_REGION_ONLY
++	string
++	default "spd.bin AGESA" if VBOOT
++
++# In order to avoid an ASSERT on a stack overwrite while flashing the
++# bootorder, vboot builds on this board need a larger stack.
++config STACK_SIZE
++	hex
++	default 0x2000 if VBOOT
++
+ endif # BOARD_PCENGINES_APU2
+diff --git a/src/mainboard/pcengines/apu2/Makefile.mk b/src/mainboard/pcengines/apu2/Makefile.mk
+index 93df43d17d..fdd972fed0 100644
+--- a/src/mainboard/pcengines/apu2/Makefile.mk
++++ b/src/mainboard/pcengines/apu2/Makefile.mk
+@@ -1,5 +1,11 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ 
++# The AMD AGESA include paths are added to CC_<stage> relative to the coreboot
++# root. The external vboot library is built from 3rdparty/vboot, where those
++# paths don't resolve, so GCC's -Werror=missing-include-dirs rejects them.
++# This only affects this board's vboot builds; don't make that warning fatal.
++CFLAGS_common += -Wno-missing-include-dirs
++
+ bootblock-y += bootblock.c
+ 
+ romstage-y += BiosCallOuts.c
+diff --git a/src/mainboard/pcengines/apu2/vboot-rw-ab.fmd b/src/mainboard/pcengines/apu2/vboot-rw-ab.fmd
+new file mode 100644
+index 0000000000..c17402e616
+--- /dev/null
++++ b/src/mainboard/pcengines/apu2/vboot-rw-ab.fmd
+@@ -0,0 +1,29 @@
++FLASH 8M {
++	SI_BIOS@0x0 0x800000 {
++		MISC_RW@0x0 0xa0000 {
++			RW_UNUSED@0x0 0x1c000
++			RW_VPD@0x1c000 0x4000
++			PSPDIR@0x20000 0x80000
++		}
++		RW_SECTION_A@0xa0000 0x230000 {
++			VBLOCK_A@0x0 0x10000
++			FW_MAIN_A(CBFS)@0x10000 0x21ffc0
++			RW_FWID_A@0x22ffc0 0x40
++		}
++		RW_SECTION_B@0x2d0000 0x230000 {
++			VBLOCK_B@0x0 0x10000
++			FW_MAIN_B(CBFS)@0x10000 0x21ffc0
++			RW_FWID_B@0x22ffc0 0x40
++		}
++		WP_RO@0x500000 0x300000{
++			RO_VPD@0x0 0x4000
++			RO_SECTION@0x4000 0x2fc000{
++				FMAP@0x0 0x800
++				RO_FRID@0x800 0x40
++				RO_FRID_PAD@0x840 0x7c0
++				GBB@0x1000 0xef000
++				COREBOOT(CBFS)@0xf0000 0x20c000
++			}
++		}
++	}
++}
+diff --git a/src/southbridge/amd/pi/hudson/Kconfig b/src/southbridge/amd/pi/hudson/Kconfig
+index a38311cffb..a711a08412 100644
+--- a/src/southbridge/amd/pi/hudson/Kconfig
++++ b/src/southbridge/amd/pi/hudson/Kconfig
+@@ -62,6 +62,16 @@ config AMDFW_CONFIG_FILE
+ 	string "AMD PSP Firmware config file"
+ 	default "src/southbridge/amd/pi/hudson/fw_avl.cfg" if CPU_AMD_PI_00730F01
+ 
++config AMDFW_OUTSIDE_CBFS
++	bool "The AMD firmware is outside CBFS"
++	default n
++	help
++	  The AMDFW (PSP) is typically locatable in CBFS. Select this option
++	  to manually attach the generated amdfw.rom at a fixed offset
++	  (0x20000) from the bottom of the ROM image instead. This is needed
++	  by boards whose flashmap reserves a raw PSPDIR region outside any
++	  CBFS, e.g. pcengines/apu2 with vboot.
++
+ config HUDSON_XHCI_FWM_FILE
+ 	string "XHCI firmware path and filename"
+ 	default "3rdparty/blobs/southbridge/amd/avalon/xhci.bin"
+diff --git a/src/southbridge/amd/pi/hudson/Makefile.mk b/src/southbridge/amd/pi/hudson/Makefile.mk
+index c7b969856c..dc1834ddaf 100644
+--- a/src/southbridge/amd/pi/hudson/Makefile.mk
++++ b/src/southbridge/amd/pi/hudson/Makefile.mk
+@@ -47,7 +47,12 @@ CPPFLAGS_common += -I$(src)/southbridge/amd/pi/hudson/include
+ #
+ # EC ROM should be 64K aligned.
+ 
++ifeq ($(CONFIG_AMDFW_OUTSIDE_CBFS),y)
++# amdfwtool takes a location relative to the bottom of the ROM.
++HUDSON_FWM_POSITION=0x20000
++else
+ HUDSON_FWM_POSITION=0x720000
++endif
+ 
+ add_opt_prefix=$(if $(call strip_quotes, $(1)), $(2) $(call strip_quotes, $(1)), )
+ 
+@@ -69,6 +74,17 @@ $(obj)/amdfw.rom:	$(call strip_quotes, $(CONFIG_HUDSON_XHCI_FWM_FILE)) \
+ 		--config $(CONFIG_AMDFW_CONFIG_FILE) \
+ 		--output	$@
+ 
++ifeq ($(CONFIG_AMDFW_OUTSIDE_CBFS),y)
++
++# Attach the AMD firmware at a fixed offset outside CBFS, so it can sit in a
++# raw FMAP region (PSPDIR@0x20000) rather than inside the coreboot CBFS.
++$(call add_intermediate, add_amdfw, $(obj)/amdfw.rom)
++	printf "    DD         Adding AMD Firmware\n"
++	dd if=$(obj)/amdfw.rom \
++		of=$< conv=notrunc bs=1 seek=$(HUDSON_FWM_POSITION) >/dev/null 2>&1
++
++else # ifeq ($(CONFIG_AMDFW_OUTSIDE_CBFS),y)
++
+ cbfs-files-y += apu/amdfw
+ apu/amdfw-file := $(obj)/amdfw.rom
+ apu/amdfw-position := $(call int-add, \
+@@ -76,3 +92,5 @@ apu/amdfw-position := $(call int-add, \
+ 	1 \
+ 	$(HUDSON_FWM_POSITION))
+ apu/amdfw-type := raw
++
++endif # ifeq ($(CONFIG_AMDFW_OUTSIDE_CBFS),y)
+diff --git a/src/vendorcode/amd/pi/Makefile.mk b/src/vendorcode/amd/pi/Makefile.mk
+index 446e9d4779..c486750e64 100644
+--- a/src/vendorcode/amd/pi/Makefile.mk
++++ b/src/vendorcode/amd/pi/Makefile.mk
+@@ -165,9 +165,13 @@ ramstage-libs += $(agesa_output_path)/libagesa.a
+ 
+ #######################################################################
+ 
+-cbfs-files-y += $(CONFIG_AGESA_CBFS_NAME)
+-$(CONFIG_AGESA_CBFS_NAME)-file := $(CONFIG_AGESA_BINARY_PI_FILE)
+-$(CONFIG_AGESA_CBFS_NAME)-type := raw
+-$(CONFIG_AGESA_CBFS_NAME)-position := $(CONFIG_AGESA_BINARY_PI_LOCATION)
++# Kconfig string values keep their surrounding quotes, so strip them: the name
++# must match the plain filenames used in vboot's RO_REGION_ONLY.
++agesa_binary := $(call strip_quotes,$(CONFIG_AGESA_CBFS_NAME))
++
++cbfs-files-y += $(agesa_binary)
++$(agesa_binary)-file := $(CONFIG_AGESA_BINARY_PI_FILE)
++$(agesa_binary)-type := raw
++$(agesa_binary)-position := $(CONFIG_AGESA_BINARY_PI_LOCATION)
+ 
+ endif

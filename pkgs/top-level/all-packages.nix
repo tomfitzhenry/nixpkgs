@@ -1486,7 +1486,11 @@ with pkgs;
     extraPackages = [ ffmpeg ];
   };
 
-  inherit (callPackage ../misc/coreboot { }) mkCoreboot;
+  inherit (callPackage ../misc/coreboot { })
+    corebootBlobs
+    corebootVboot_apu2
+    mkCoreboot
+    ;
 
   inherit (callPackages ../tools/misc/coreboot-utils { })
     msrtool
